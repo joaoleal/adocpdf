@@ -196,6 +196,17 @@ a completion that did not happen. Likely first-run failures — a missing
 toolchain component, a `PATH` assumption — are cheap to fix once observed and
 expensive to guess at now.
 
+**Outcome, recorded during apply.** This constraint was lifted: the user gave
+explicit consent to create `github.com/joaoleal/adocpdf` and push, so the
+workflow did execute. Run `31953888060` succeeded on the first attempt — every
+provisioning step and all seventeen gate jobs, ending in `gate passed`. Two of
+the guesses this decision worried about turned out to matter and had already
+been fixed before pushing: `actionlint` installs to `/usr/local/bin` rather than
+`$HOME/.local/bin`, because whether the latter is on `PATH` is a property of the
+runner image; and the MSRV is read out of `gate.sh` instead of duplicated in the
+workflow. The handover in task 7.2 is therefore a real result rather than a list
+of unproven claims.
+
 ### D9 — `SECURITY.md` states the security model, not just an address
 
 A disclosure file that says only "email us" leaves a reporter guessing what

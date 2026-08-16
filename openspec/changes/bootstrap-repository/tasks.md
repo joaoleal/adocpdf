@@ -102,7 +102,7 @@
 
 - [x] 7.1 Run the full `scripts/ci/gate.sh` — now seventeen jobs — and confirm
       it passes. *Verified by:* the gate prints `gate passed`.
-- [ ] 7.2 Report to the user that the workflow is **statically verified but has
+- [x] 7.2 Report to the user that the workflow is **statically verified but has
       never executed**, and that its first real run requires a push, which
       `AGENTS.md` forbids without explicit consent (design D8). *Verified by:*
       the handover states plainly which parts are proven and which are not; no
