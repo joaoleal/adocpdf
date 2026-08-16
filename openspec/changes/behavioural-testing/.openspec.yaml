@@ -1,0 +1,15 @@
+schema: spec-driven
+created: 2026-08-16
+
+# No capability changes. Every property this change tests is already a
+# requirement written down in `render-first-pdf`:
+#
+#   "Source content cannot alter rendering instructions"  (document-rendering)
+#   "All file access is confined to a project root"       (project-sandbox)
+#   "Malformed source still produces a document"          (document-rendering)
+#
+# What changes is the strength of the evidence for them — from a handful of
+# examples to a quantified claim, a fuzzer, and a mutation run. Restating a
+# requirement as a delta because its test improved would make the spec a log of
+# testing activity rather than a description of behaviour.
+skip_specs: true

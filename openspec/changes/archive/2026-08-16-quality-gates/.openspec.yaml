@@ -1,0 +1,9 @@
+schema: spec-driven
+created: 2026-08-16
+
+# No capability changes: this change alters the build, the tooling and the
+# repository's paperwork, not what `adocpdf` does when you run it. Every
+# requirement in the existing specs holds exactly as written before and after.
+# Inventing a capability to satisfy validation would put a spec-shaped claim on
+# something that is not observable product behaviour.
+skip_specs: true

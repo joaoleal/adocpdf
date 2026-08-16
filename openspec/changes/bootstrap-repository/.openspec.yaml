@@ -1,0 +1,10 @@
+schema: spec-driven
+created: 2026-08-16
+
+# No capability changes: this change puts the working tree under version
+# control and makes the existing quality gate run automatically. It adds no
+# requirement to `adocpdf` and removes none. Running `adocpdf book.adoc
+# book.pdf` produces exactly the same bytes before and after. Inventing a
+# capability to satisfy validation would put a spec-shaped claim on something
+# that is not observable product behaviour.
+skip_specs: true

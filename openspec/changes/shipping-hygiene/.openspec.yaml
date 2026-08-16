@@ -1,0 +1,10 @@
+schema: spec-driven
+created: 2026-08-16
+
+# No capability changes. This change alters how the binary is built, what
+# metadata travels inside it, and how the repository's history is checked and
+# summarised. It adds no requirement to `adocpdf` and removes none: the same
+# document with the same `--date` renders to the same PDF bytes before and
+# after. The determinism requirement is about that output, not about the
+# binary's own bytes — see design.md, D7.
+skip_specs: true

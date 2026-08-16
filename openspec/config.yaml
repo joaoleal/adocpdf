@@ -1,0 +1,123 @@
+schema: spec-driven
+
+context: |
+  # adocpdf
+
+  A Rust CLI that typesets AsciiDoc to PDF. Comparable in purpose to
+  asciidoctor-pdf, deliberately different in four ways:
+
+  1. Progressive updates. Adding a character or a line must regenerate quickly —
+     ideally only the pages the reader can currently see, not the whole document.
+  2. A markedly better layout engine, of LaTeX calibre (optimal line breaking,
+     penalty-driven page breaking).
+  3. User-defined themes, where different sections of one document may use
+     different themes.
+  4. Runs on WASM and WASI as well as natively.
+
+  ## Decisions already made (do not re-litigate without a new change)
+
+  - Layout/PDF engine: EMBED TYPST as a library (Apache-2.0). Verified: Typst
+    implements Knuth-Plass optimal line breaking (`linebreak_optimized`) plus a
+    greedy fallback; it caches layout at element granularity; `typst::compile`
+    takes SOURCE MARKUP, not an IR, and returns a `PagedDocument` of per-page
+    `Frame`s exportable to PDF or SVG.
+  - AsciiDoc front end: WRAP the `asciidoc-parser` crate behind a domain port,
+    do not write a parser. It is the most mature Rust option and exposes
+    `SafeMode` and `ReferenceTime`, which map onto our sandbox and determinism
+    requirements. Swapping it later must not touch business rules.
+  - Architecture: Clean Architecture, strict inward dependency rule, enforced by
+    a checked-in guard rather than convention.
+  - Naming: workspace and binary are `adocpdf`; crates are `adocpdf-*`;
+    environment variables are `ADOCPDF_*`.
+
+  ## Consequences of embedding Typst (design constraints, verified)
+
+  - A mid-document `set page` makes Typst start a new page. So a section theme
+    that changes PAGE GEOMETRY forces a page break, while one that changes only
+    TYPOGRAPHY does not. The theme model must make that distinction explicit
+    rather than hiding it.
+  - Because emission is markup, AsciiDoc -> Typst is an INJECTION BOUNDARY.
+    Anything interpolated into generated markup must be escaped or drawn from a
+    restricted alphabet.
+  - Typst's `World` trait (`source`, `file`, `font`, `today`) is the engine's
+    own port for the outside world. Implement it in the infrastructure layer;
+    never let it leak inward.
+  - `World::today` and the parser's `ReferenceTime` both read a clock. Inject
+    the date through a port so builds are reproducible.
+
+  ## Architecture — strict dependency rule
+
+  Dependencies flow strictly inward. A crate may depend only on crates in its
+  allowed set:
+
+    adocpdf-core    -> (nothing; std only)
+    adocpdf-domain  -> core
+    adocpdf-shared  -> core
+    adocpdf-infra   -> core, domain, shared
+    adocpdf-cli     -> core, domain, shared, infra
+    adocpdf-wasm    -> core, domain, shared, infra
+
+  - `adocpdf-core` is the innermost ring: the document and theme model, zero
+    dependencies. Any layer may depend inward on it.
+  - `adocpdf-domain` holds entities, value objects, ports and use cases. It must
+    never name Typst, `asciidoc-parser`, the filesystem, or a delivery
+    mechanism.
+  - `adocpdf-shared` holds boundary DTOs only. It must stay free of domain
+    business rules so the wasm layer can serialize a request without linking
+    them.
+  - `adocpdf-infra` implements domain ports. Adapters catch external errors at
+    the boundary and map them to typed domain errors.
+  - Delivery crates (`cli`, `wasm`) are composition roots: they construct
+    adapters and inject them. No business logic.
+  - A crate must never depend on a delivery crate.
+
+  ## Conventions
+
+  - Errors: use cases and fallible domain operations return
+    `Result<T, DomainError>`. Never a raw string, `anyhow`, or a bare
+    `Box<dyn Error>` in domain or application code. Adapters map external errors
+    at the boundary.
+  - Value objects validate on construction and are immutable after. An invalid
+    value must not be representable.
+  - Ports are traits owned by the domain; adapters live in infra and are
+    injected at a composition root. No DI framework, no global singletons.
+  - Testing: domain use cases are tested with hand-written in-memory fakes, not
+    a mocking crate. Adapters get integration tests against real I/O.
+  - Test names describe behaviour. Never name a test after a task or
+    requirement id.
+  - No `unsafe`. No `unwrap`/`expect` in production paths — they are permitted
+    in tests and for invariants that are provably unreachable, with a message
+    saying why.
+  - Public items carry rustdoc. Every public fallible function documents its
+    `# Errors`. Comments explain why, not what.
+  - Determinism: identical inputs produce identical output. Nothing may depend
+    on wall-clock time, locale, ambient machine state, or map iteration order.
+  - Commits follow Conventional Commits (`feat(domain): ...`). Never push or
+    merge without explicit consent.
+  - Quality gate before any change is done: `cargo fmt --check`, `cargo clippy
+    -- -D warnings`, `cargo test` across every touched crate, the architecture
+    guard, and a build for the wasm targets. A green typecheck is not a passing
+    test suite.
+
+rules:
+  proposal:
+    - State what changes and why. Include a "Non-goals" section.
+    - Name which architectural layers the change touches.
+    - If the change re-opens a decision recorded in the project context, say so
+      explicitly and justify it.
+  design:
+    - Record the dependency direction for anything new, and how the architecture
+      guard will see it.
+    - For any third-party crate, state the exact version and its license.
+    - Prefer citing a verified fact over asserting a plausible one. If something
+      was not verified, mark it as unverified rather than stating it flatly.
+    - Call out any injection, sandbox, or determinism boundary the change
+      touches.
+  tasks:
+    - One deliverable per task. Never split "write the test" and "write the
+      implementation" into separate tasks.
+    - Each task must be independently verifiable, and say how it is verified.
+    - Order tasks so the workspace builds and tests pass after each one.
+  specs:
+    - Requirements describe externally observable behaviour, not implementation.
+    - Every requirement needs at least one scenario, including the failure path.
