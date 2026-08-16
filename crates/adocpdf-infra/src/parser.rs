@@ -48,7 +48,9 @@ impl AsciidocParser {
 }
 
 impl DocumentParser for AsciidocParser {
-    fn parse(&self, source: &str, _origin: &str, today: Date) -> Result<ParseOutcome, DomainError> {
+    fn parse(&self, source: &str, origin: &str, today: Date) -> Result<ParseOutcome, DomainError> {
+        refuse_input_that_would_not_terminate(source, origin)?;
+
         let parsed = Parser::default()
             // The most restrictive mode: no includes, no file-reading macros.
             // A document must not be able to widen its own access.
@@ -77,6 +79,74 @@ impl DocumentParser for AsciidocParser {
             skipped: mapper.skipped,
         })
     }
+}
+
+/// Characters that stop `asciidoc-parser` returning, and the shape of document
+/// in which they do it.
+///
+/// # The defect
+///
+/// `asciidoc-parser` 0.29.19 does not terminate on a document that contains a
+/// vertical tab or a form feed and nothing else of substance.
+/// `Parser::parse("\u{c}")` spins indefinitely — verified against the crate
+/// directly, with none of this module's code involved, so this is upstream and
+/// not a mapping error here. It was found by the `parse_plan_emit` fuzz target
+/// and minimised to a single byte.
+///
+/// `SECURITY.md` classifies a hang on untrusted input as a vulnerability
+/// rather than a rendering bug, which is why this is refused rather than
+/// tolerated.
+///
+/// # Why the condition is this narrow
+///
+/// Every C0, DEL and C1 character was probed against the real parser, alone
+/// and embedded in text. Exactly two hang, and only when the document holds no
+/// non-whitespace character: `"Hello\u{c}world"`, `"a\u{c}"` and `"\u{c}a"`
+/// all parse normally and must keep doing so. Refusing every form feed would
+/// break documents that work today.
+///
+/// # When to delete this
+///
+/// When a released `asciidoc-parser` terminates on these inputs and this
+/// workspace has adopted it. The regression tests in
+/// `tests/hang_regressions.rs` do not depend on this function and will then
+/// pass because the defect is gone rather than because it is unreachable.
+const CHARACTERS_UPSTREAM_CANNOT_PARSE: [char; 2] = ['\u{b}', '\u{c}'];
+
+/// Declines a document that the parser would not return from.
+///
+/// # Errors
+///
+/// Returns [`DomainError::ParseFailed`] naming the offending character when
+/// `source` holds one of [`CHARACTERS_UPSTREAM_CANNOT_PARSE`] and contains
+/// nothing but whitespace.
+fn refuse_input_that_would_not_terminate(source: &str, origin: &str) -> Result<(), DomainError> {
+    // A document with any real content in it parses fine, whatever control
+    // characters sit beside that content. Checking this first also means the
+    // scan stops early for every ordinary document.
+    if source.chars().any(|character| !character.is_whitespace()) {
+        return Ok(());
+    }
+
+    let Some(offender) = source
+        .chars()
+        .find(|character| CHARACTERS_UPSTREAM_CANNOT_PARSE.contains(character))
+    else {
+        return Ok(());
+    };
+
+    Err(DomainError::ParseFailed {
+        path: origin.to_owned(),
+        // The document is nothing but whitespace, so there is no meaningful
+        // position to report beyond its beginning.
+        location: SourceLocation::START,
+        reason: format!(
+            "the document contains U+{:04X} and no other content; \
+             asciidoc-parser 0.29.19 does not terminate on such a document, \
+             so it is refused rather than rendered",
+            offender as u32
+        ),
+    })
 }
 
 /// Maps parsed blocks into the document model, collecting what it cannot.
