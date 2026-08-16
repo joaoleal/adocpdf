@@ -128,6 +128,23 @@ run_tool_job "feature combinations" cargo-hack \
     "cargo install cargo-hack --locked" \
     cargo hack check --workspace --feature-powerset --no-dev-deps --quiet
 
+# The workflow files run on every push and carry a token. Everything else in
+# this repository is linted; leaving the one file with those properties
+# unchecked would be the wrong place to make an exception.
+#
+# Two tools, because they answer different questions. `actionlint` is about
+# correctness — expression syntax, invalid runner labels, and shellcheck over
+# the `run:` blocks, which are otherwise the only shell here this gate does not
+# see. `zizmor` is about security — script injection through untrusted
+# interpolation, over-broad permissions, unpinned actions.
+run_tool_job "workflow syntax" actionlint \
+    "download from https://github.com/rhysd/actionlint/releases" \
+    actionlint
+
+run_tool_job "workflow security" zizmor \
+    "cargo install zizmor --locked" \
+    zizmor --quiet .github/workflows
+
 # --- dependency hygiene ------------------------------------------------------
 
 run_tool_job "advisories" cargo-audit \

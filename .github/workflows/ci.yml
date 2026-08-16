@@ -1,0 +1,127 @@
+# The merge check.
+#
+# This workflow deliberately does NOT reimplement the gate's jobs as a matrix.
+# It installs what `scripts/ci/gate.sh` needs and then runs that script, so the
+# command a contributor runs locally and the command that blocks a merge are
+# the same command. Two definitions would drift, and the difference would
+# surface as "it passes on my machine" — the failure a gate exists to prevent.
+#
+# The cost is one long serial job instead of parallel per-check statuses. It is
+# partly repaid by the gate itself: it collects failures rather than aborting on
+# the first, so a single run reports every failing job by name.
+#
+# Every `uses:` is pinned to a full commit SHA. A tag is a mutable pointer, and
+# retargeting one is the shape of most GitHub Actions supply-chain incidents.
+# The trailing comment names the version each SHA resolved to when it was
+# added, checked against the repository's tag refs rather than recalled.
+# `.github/dependabot.yml` keeps these pins current; `zizmor` fails the gate if
+# one is ever replaced by a tag.
+
+name: gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read the checkout, write nothing back. Any future job needing more asks for
+# it on that job alone.
+permissions:
+  contents: read
+
+# A superseded push has nothing to tell us; the gate is expensive enough that
+# finishing it would only delay the run that matters.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ACTIONLINT_VERSION: "1.7.12"
+
+jobs:
+  gate:
+    name: quality gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The gate only reads the tree. Leaving the token in .git/config
+          # would expose it to every later step for no benefit.
+          persist-credentials: false
+
+      # No toolchain action is used. rust-toolchain.toml already pins the
+      # channel (1.97.1), the components (clippy, rustfmt, llvm-tools-preview)
+      # and the targets (wasm32-unknown-unknown, wasm32-wasip1), and rustup
+      # honours it on the first cargo invocation. Adding an action here would
+      # mean a second, weaker statement of the same thing — and one more
+      # third-party dependency in a workflow whose theme is fewer of them.
+      - name: Install the pinned toolchain
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustc --version
+          cargo --version
+
+      # `wasm_build` in the gate targets wasm32-unknown-unknown. It is declared
+      # in rust-toolchain.toml, but a target is only fetched for the toolchain
+      # rustup installs it against, so this is explicit rather than assumed.
+      - name: Add the WASM target
+        run: rustup target add wasm32-unknown-unknown
+
+      # `msrv_build` checks that the rust-version every manifest declares is
+      # real. It looks for one exact toolchain and fails if it is absent.
+      #
+      # The version is read out of gate.sh rather than repeated here. Writing
+      # it twice would mean the gate could raise its MSRV and CI would keep
+      # provisioning the old toolchain — a drift that shows up as a confusing
+      # failure rather than as an obvious one.
+      - name: Install the MSRV toolchain
+        run: |
+          set -euo pipefail
+          msrv=$(sed -n 's/^readonly MSRV=\([0-9.]*\)$/\1/p' scripts/ci/gate.sh)
+          if [ -z "$msrv" ]; then
+            echo "could not read MSRV from scripts/ci/gate.sh" >&2
+            exit 1
+          fi
+          echo "MSRV declared by the gate: $msrv"
+          rustup toolchain install "$msrv" --profile minimal
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # Prebuilt binaries. `cargo install` would compile eight substantial
+      # tools from source on every cache miss.
+      - name: Install the gate's tools
+        uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780 # v2.86.1
+        with:
+          tool: >-
+            cargo-llvm-cov,
+            cargo-audit,
+            cargo-deny,
+            cargo-machete,
+            cargo-hack,
+            typos,
+            taplo,
+            shellcheck,
+            zizmor
+
+      # actionlint is the one tool the action above does not carry, checked
+      # against its TOOLS.md. Its own release binary is the documented
+      # alternative; there is no Go toolchain assumption here.
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --proto '=https' --tlsv1.2 -sSfL "$url" -o /tmp/actionlint.tar.gz
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          # Not $HOME/.local/bin: whether that is on PATH is a property of the
+          # runner image, and a gate must not depend on one.
+          install -m755 /tmp/actionlint /usr/local/bin/actionlint
+          actionlint --version
+
+      # One command. Every check, in the order and with the messages a
+      # contributor sees locally.
+      - name: Run the quality gate
+        run: scripts/ci/gate.sh

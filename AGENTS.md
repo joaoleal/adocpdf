@@ -108,20 +108,24 @@ containment rule lives in `adocpdf-domain::sandbox`; resolution is the
 scripts/ci/gate.sh
 ```
 
-Fifteen jobs: formatting, lints, tests, the architecture guard, the WASM build,
-docs, MSRV, shell, TOML, spelling, feature combinations, advisories, licences,
-unused dependencies, and coverage. A green typecheck is not a passing test
-suite. Run it before considering a change done.
+Seventeen jobs: formatting, lints, tests, the architecture guard, the WASM
+build, docs, MSRV, shell, TOML, spelling, feature combinations, workflow syntax,
+workflow security, advisories, licences, unused dependencies, and coverage. A
+green typecheck is not a passing test suite. Run it before considering a change
+done.
 
 Requires `~/.cargo/bin` on `PATH`, plus the tools that do not ship with the
 toolchain:
 
 ```bash
 cargo install cargo-llvm-cov cargo-audit cargo-deny cargo-machete \
-              typos-cli taplo-cli cargo-hack --locked
+              typos-cli taplo-cli cargo-hack zizmor --locked
 sudo apt install shellcheck
 rustup toolchain install 1.92 --profile minimal
 ```
+
+`actionlint` is not on crates.io; install its release binary from
+<https://github.com/rhysd/actionlint/releases>.
 
 A job whose tool is missing **fails**; it never skips.
 
@@ -138,6 +142,9 @@ A job whose tool is missing **fails**; it never skips.
 | Licence allow-list, bans, sources | `deny.toml` |
 | Tolerated advisories, with reasons | `.cargo/audit.toml` |
 | Coverage floor, MSRV | `MIN_LINE_COVERAGE`, `MSRV` in `scripts/ci/gate.sh` |
+| Editor defaults, mirroring the formatters | `.editorconfig` |
+| What CI runs, and the SHA every action is pinned to | `.github/workflows/ci.yml` |
+| Dependency update schedule | `.github/dependabot.yml` |
 
 ### Do not write a checker
 

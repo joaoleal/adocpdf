@@ -1,0 +1,12 @@
+# Review ownership.
+#
+# One maintainer today, so a single catch-all rule is the honest description.
+# Splitting this by layer would imply a review structure that does not exist.
+# When the project gains contributors, the boundaries worth naming first are
+# the two the security policy rests on: the injection boundary in
+# `markup.rs` and the containment rule in `sandbox.rs`.
+#
+# CODEOWNERS only takes effect once branch protection requires review — see
+# CONTRIBUTING.md, "Repository settings this repository expects".
+
+* @joaoleal

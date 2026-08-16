@@ -67,14 +67,17 @@ Run it before considering any change done:
 scripts/ci/gate.sh
 ```
 
-Its fifteen jobs need tools that do not ship with the toolchain:
+Its seventeen jobs need tools that do not ship with the toolchain:
 
 ```bash
 cargo install cargo-llvm-cov cargo-audit cargo-deny cargo-machete \
-              typos-cli taplo-cli cargo-hack --locked
+              typos-cli taplo-cli cargo-hack zizmor --locked
 sudo apt install shellcheck          # or your platform's package manager
 rustup toolchain install 1.92 --profile minimal   # the declared MSRV
 ```
+
+`actionlint` has no crates.io release; take its binary from
+[the releases page](https://github.com/rhysd/actionlint/releases).
 
 **A job whose tool is missing fails — it never skips.** A check that quietly
 skips reports success on a machine that verified nothing, which is worse than
@@ -93,6 +96,8 @@ having no check at all. The failure message carries the install command.
 | toml | `taplo` formatting across every `.toml` |
 | spelling | `typos` over source and documentation |
 | feature combinations | `cargo hack` — every feature powerset compiles |
+| workflow syntax | `actionlint` — expressions, runner labels, and shellcheck over `run:` blocks |
+| workflow security | `zizmor` — script injection, over-broad permissions, unpinned actions |
 | advisories | `cargo audit` against RUSTSEC |
 | licences | `cargo deny` licence allow-list, bans, and sources |
 | unused deps | `cargo machete` |

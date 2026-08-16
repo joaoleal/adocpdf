@@ -1,0 +1,40 @@
+# Automated dependency updates.
+#
+# Dependabot rather than Renovate. Renovate is the more capable tool — grouping,
+# cooldowns, custom managers — and it also needs a GitHub App and a config file
+# that becomes its own artifact to maintain. This workspace has six direct
+# third-party dependencies. Picking the tool with more machinery than the
+# problem needs would contradict the rule that produced AGENTS.md's "Do not
+# write a checker" section.
+#
+# The `github-actions` ecosystem is not optional here. Every `uses:` in
+# ci.yml is pinned to a commit SHA, and a SHA has no other way to be updated —
+# pinning without an update mechanism is how a repository ends up running a
+# two-year-old action.
+#
+# A bump that pulls in a licence outside deny.toml's allow-list, or a new
+# advisory, will fail the gate on its own pull request. That is the gate
+# working, not a defect.
+
+version: 2
+
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      # Conventional Commits, which AGENTS.md requires of every commit and
+      # which `committed` will enforce once the shipping-hygiene change lands.
+      prefix: build
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build
+      include: scope

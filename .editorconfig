@@ -1,0 +1,43 @@
+# Editor settings, so a checkout formats the same way before `cargo fmt` runs.
+#
+# Every value here is copied from a formatter that already enforces it —
+# `rustfmt.toml` for Rust, `taplo.toml` for TOML. This file cannot introduce a
+# policy of its own: if it disagreed with either, the formatter would win and
+# the disagreement would show up as a diff nobody asked for.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+max_line_length = 100
+
+# rustfmt: hard_tabs = false, tab_spaces = 4, max_width = 100,
+# newline_style = "Unix".
+[*.rs]
+indent_size = 4
+max_line_length = 100
+
+# taplo: indent_string = "    ", column_width = 100.
+[*.toml]
+indent_size = 4
+max_line_length = 100
+
+# Two trailing spaces are a hard line break in Markdown, so trimming them
+# silently changes rendered output. `typos` checks the prose; nothing checks
+# its whitespace, which is exactly why this must not be automated away.
+[*.md]
+trim_trailing_whitespace = false
+max_line_length = 80
+
+# YAML cannot be indented with tabs at all, and two spaces is the universal
+# convention for GitHub Actions workflows.
+[*.{yml,yaml}]
+indent_size = 2
+
+[*.sh]
+indent_size = 4
