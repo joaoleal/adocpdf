@@ -5,6 +5,33 @@
 # them — see design decision D2a in the quality-gates change. Two tools reading
 # the same RUSTSEC database would disagree about severity eventually, and
 # silencing an advisory would then have to be done twice, in two syntaxes.
+#
+# WHAT THIS FILE DOES NOT COVER: `fuzz/`.
+#
+# That directory is a separate crate with its own `[workspace]` table and its
+# own lockfile, and the root manifest names it in `exclude`. `cargo deny` reads
+# this workspace's graph, so the fuzz crate's dependencies are outside its view
+# — by arrangement, not by accident.
+#
+# The arrangement exists for one reason. `libfuzzer-sys` is licensed
+# `(MIT OR Apache-2.0) AND NCSA`. The `AND` is the difficulty: every other
+# multi-licence crate in this tree offers a choice, and the allow-list below
+# takes the permissive branch. NCSA is conjunctive, so it cannot be declined,
+# and it is not in the allow-list. Were `fuzz/` in scope, this file would fail
+# the build.
+#
+# Adding NCSA to the allow-list was rejected. It is a permissive licence — it
+# is LLVM's — but the allow-list's value is that admitting a licence is a
+# reviewed decision, and granting one globally to accommodate a test tool that
+# never ships would spend that guarantee on its least important consumer.
+#
+# Revisit this if any of the following becomes true:
+#   - a fuzzing dependency would end up in a shipped artefact, in which case it
+#     must be in scope and the licence question has to be answered properly;
+#   - `fuzz/` gains a dependency whose licence matters for redistribution;
+#   - a narrower mechanism is wanted, in which case `[[licenses.exceptions]]`
+#     grants a licence to one named crate rather than to everything, which
+#     answers the objection above without widening the allow-list.
 
 [graph]
 # Check the dependency graph for the platforms actually built for. Anything

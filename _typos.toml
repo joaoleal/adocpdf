@@ -13,6 +13,18 @@ extend-exclude = [
     "LICENSE",
     "crates/adocpdf-infra/assets/",
     "openspec/changes/*/specs/",
+    # Tool output, not prose. `cargo mutants` writes build logs here and
+    # `libFuzzer` writes raw crash inputs; both are full of compiler flags,
+    # crate names and arbitrary bytes that a spellchecker will object to
+    # forever and that nobody can correct. Both directories are gitignored.
+    "mutants.out/",
+    "mutants.out.old/",
+    "fuzz/artifacts/",
+    "fuzz/corpus/",
+    "fuzz/target/",
+    # Seeds proptest saved from past failures. The comment lines are ours, but
+    # the shrunk counterexamples beside them are arbitrary generated strings.
+    "**/proptest-regressions/",
 ]
 
 [default.extend-words]

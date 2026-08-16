@@ -361,4 +361,184 @@ mod tests {
             "the boundary must never be ambiguous, got: {error}"
         );
     }
+
+    #[test]
+    fn a_root_remembers_the_spelling_it_was_given() {
+        let resolver = project_resolver();
+        let root = root_of(&resolver, "project");
+
+        // Not the resolved location. A diagnostic has to name the thing the
+        // caller typed, or they cannot connect the message to what they wrote.
+        assert_eq!(root.as_requested(), "project");
+        assert_eq!(root.path(), Path::new("/home/user/project"));
+    }
+
+    #[test]
+    fn an_accepted_path_remembers_the_spelling_it_was_given() {
+        let resolver = project_resolver().resolving(
+            "project/./docs/../book.adoc",
+            "/home/user/project/book.adoc",
+        );
+        let root = root_of(&resolver, "project");
+
+        let path =
+            SandboxedPath::resolve(Path::new("project/./docs/../book.adoc"), &root, &resolver)
+                .unwrap();
+
+        // The two differ here on purpose: the spelling went through `.` and
+        // `..`, and the resolved location did not. Reporting the resolved one
+        // would both confuse the reader and disclose more than they asked for.
+        assert_eq!(path.as_requested(), "project/./docs/../book.adoc");
+        assert_eq!(path.as_path(), Path::new("/home/user/project/book.adoc"));
+        assert_ne!(path.as_requested(), path.as_path().display().to_string());
+    }
+
+    /// The containment rule, stated for every path expression rather than for
+    /// the handful of spellings someone thought to write down.
+    ///
+    /// The rule these check is the one in the module docs: a path is judged by
+    /// where it *resolves*, never by how it is spelled. Traversal, absolute
+    /// prefixes, `.`, empty components and symlinks are not special cases —
+    /// they are all just spellings that resolve somewhere.
+    mod properties {
+        use proptest::prelude::*;
+
+        use super::super::{Path, SandboxedPath};
+        use super::{project_resolver, root_of};
+
+        const ROOT: &str = "/home/user/project";
+
+        /// The pieces a path expression is built from, including the ones that
+        /// mean something to a resolver: parent, current, and empty.
+        fn segment() -> impl Strategy<Value = String> {
+            prop_oneof![
+                Just("a"),
+                Just("b"),
+                Just("docs"),
+                Just("chapter"),
+                Just(".."),
+                Just("."),
+                Just(""),
+            ]
+            .prop_map(str::to_owned)
+        }
+
+        /// A path expression. Half are written relative to the project, half
+        /// are absolute — a distinction that must not matter on its own.
+        fn spelling() -> impl Strategy<Value = String> {
+            (any::<bool>(), proptest::collection::vec(segment(), 1..6)).prop_map(
+                |(absolute, segments)| {
+                    let joined = segments.join("/");
+                    if absolute {
+                        format!("/{joined}")
+                    } else {
+                        format!("project/{joined}")
+                    }
+                },
+            )
+        }
+
+        /// Somewhere a path might resolve to: inside the root, or outside it.
+        ///
+        /// `/home/user/project-notes` is deliberately present. It shares a
+        /// textual prefix with the root but is a different directory, and a
+        /// containment check written with string comparison rather than path
+        /// components would wrongly admit it.
+        fn location() -> impl Strategy<Value = String> {
+            prop_oneof![
+                Just("/home/user/project/book.adoc"),
+                Just("/home/user/project/docs/chapter.adoc"),
+                Just("/home/user/project"),
+                Just("/etc/passwd"),
+                Just("/home/user/other/book.adoc"),
+                Just("/home/user/project-notes/book.adoc"),
+                Just("/"),
+            ]
+            .prop_map(str::to_owned)
+        }
+
+        proptest! {
+            /// Two different spellings that resolve to the same place are
+            /// accepted or refused alike.
+            ///
+            /// This is the property the whole sandbox rests on. If it ever
+            /// fails, some spelling has become its own case — which is how a
+            /// traversal gets through a checker that was looking for `..`.
+            #[test]
+            fn two_spellings_of_one_location_get_the_same_verdict(
+                first in spelling(),
+                second in spelling(),
+                target in location(),
+            ) {
+                prop_assume!(first != second);
+                prop_assume!(first != "project" && second != "project");
+
+                let resolver = project_resolver()
+                    .resolving(&first, &target)
+                    .resolving(&second, &target);
+                let root = root_of(&resolver, "project");
+
+                let one = SandboxedPath::resolve(Path::new(&first), &root, &resolver);
+                let other = SandboxedPath::resolve(Path::new(&second), &root, &resolver);
+
+                prop_assert_eq!(
+                    one.is_ok(),
+                    other.is_ok(),
+                    "{:?} and {:?} both resolve to {:?} but were judged differently",
+                    first, second, target
+                );
+
+                if let (Ok(one), Ok(other)) = (&one, &other) {
+                    prop_assert_eq!(
+                        one.as_path(),
+                        other.as_path(),
+                        "same location, different accepted path"
+                    );
+                }
+            }
+
+            /// The verdict is exactly containment of the resolved location,
+            /// and nothing else about the expression.
+            #[test]
+            fn the_verdict_is_containment_of_the_resolved_location(
+                spelled in spelling(),
+                target in location(),
+            ) {
+                prop_assume!(spelled != "project");
+
+                let resolver = project_resolver().resolving(&spelled, &target);
+                let root = root_of(&resolver, "project");
+
+                let accepted =
+                    SandboxedPath::resolve(Path::new(&spelled), &root, &resolver).is_ok();
+                let contained = Path::new(&target).starts_with(Path::new(ROOT));
+
+                prop_assert_eq!(
+                    accepted,
+                    contained,
+                    "{:?} resolves to {:?}; containment says {} but the sandbox said {}",
+                    spelled, target, contained, accepted
+                );
+            }
+
+            /// A path that resolves nowhere is refused, and is refused the same
+            /// way a path outside the root is — the sandbox must not double as
+            /// an oracle for which files exist.
+            #[test]
+            fn an_unresolvable_path_is_refused_like_any_other(spelled in spelling()) {
+                prop_assume!(spelled != "project");
+
+                let resolver = project_resolver();
+                let root = root_of(&resolver, "project");
+
+                let error = SandboxedPath::resolve(Path::new(&spelled), &root, &resolver)
+                    .expect_err("a path the resolver does not know cannot be accepted");
+
+                prop_assert!(
+                    matches!(error, crate::error::DomainError::PathOutsideRoot { .. }),
+                    "expected the same refusal as an escaping path, got {error:?}"
+                );
+            }
+        }
+    }
 }

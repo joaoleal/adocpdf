@@ -1,0 +1,46 @@
+# The fuzz crate, deliberately outside the main workspace.
+#
+# Two things here are hand-written rather than generated, because
+# `cargo fuzz init` gets both wrong against a workspace shaped like this one:
+#
+# 1. The `[workspace]` table below. Since cargo-fuzz 0.11.4 the generator no
+#    longer emits one, so the crate would otherwise be resolved by whatever
+#    workspace encloses it. It needs its own, because `libfuzzer-sys` is
+#    `(MIT OR Apache-2.0) AND NCSA` — a conjunction — and NCSA is not in
+#    `deny.toml`'s allow-list. An independent lockfile is what keeps that crate
+#    out of the tree `cargo deny` and `cargo audit` read. The root manifest
+#    also names this directory in its `exclude`, so the isolation is stated
+#    from both sides.
+#
+# 2. The dependencies. The generator wrote `adocpdf-cli` with `path = ".."`,
+#    picked from the first package it found; `..` is a *virtual* manifest here,
+#    so it does not resolve at all. The target fuzzes the pure
+#    parse -> plan -> emit path, so it depends on the crates that path lives
+#    in, and on no delivery crate.
+#
+# Fuzzing needs a nightly compiler: cargo-fuzz relies on LLVM sanitizer
+# instrumentation, which is still unstable. Nothing in the gate runs from here.
+
+[workspace]
+
+[package]
+name = "adocpdf-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+adocpdf-core = { path = "../crates/adocpdf-core" }
+adocpdf-domain = { path = "../crates/adocpdf-domain" }
+adocpdf-infra = { path = "../crates/adocpdf-infra" }
+
+[[bin]]
+name = "parse_plan_emit"
+path = "fuzz_targets/parse_plan_emit.rs"
+test = false
+doc = false
+bench = false

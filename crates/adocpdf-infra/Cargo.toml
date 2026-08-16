@@ -18,3 +18,9 @@ typst-pdf.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+# Reads the text back out of a rendered PDF, so the Tier 2 injection property
+# asserts on what a reader would actually see rather than on our own buffer.
+pdf-extract.workspace = true

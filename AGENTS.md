@@ -129,6 +129,50 @@ rustup toolchain install 1.92 --profile minimal
 
 A job whose tool is missing **fails**; it never skips.
 
+### Three instruments that are not in the gate
+
+The gate answers "does this change break anything we already check". These
+three answer different questions, take too long for a merge to wait on, and run
+on a schedule instead. None of them is a substitute for a test.
+
+| Instrument | Question it answers | Where it runs |
+|---|---|---|
+| `proptest` | does the rule hold for *every* input, not just the examples | in the gate, as ordinary tests |
+| `cargo-fuzz` | is there an input nobody thought of that panics or hangs | `.github/workflows/fuzz.yml`, weekly, **nightly toolchain** |
+| `cargo-mutants` | would any test have noticed if this code were wrong | `.github/workflows/mutants.yml`, weekly |
+
+**Property tests are the exception — they are in the gate**, because they are
+ordinary `#[test]`s. `crates/adocpdf-infra/src/markup.rs` and
+`crates/adocpdf-domain/src/sandbox.rs` each carry a `properties` module, and
+`crates/adocpdf-infra/tests/injection.rs` runs the same claim through the real
+engine at a lower case count. Failing seeds are saved to
+`proptest-regressions/` and **are committed** — that directory is a record of
+every counterexample ever found, and deleting it throws that away.
+
+**Fuzzing needs nightly** and cannot run from the pinned toolchain:
+`cargo-fuzz` depends on LLVM sanitizer instrumentation, which is unstable.
+
+```bash
+rustup toolchain install nightly
+cargo install cargo-fuzz --locked
+cargo +nightly fuzz run parse_plan_emit -- -max_total_time=300 -timeout=10
+```
+
+Pass `-timeout=N`. libFuzzer's default per-input timeout is 1200 seconds, so a
+hang looks identical to slow progress until twenty minutes have passed — which
+is exactly how the `U+000C` defect nearly went unnoticed.
+
+`fuzz/` is **not** part of the workspace, and the root manifest excludes it
+explicitly. `libfuzzer-sys` is `(MIT OR Apache-2.0) AND NCSA`, a conjunction,
+and NCSA is not in `deny.toml`'s allow-list — see the note in that file.
+
+**What none of this proves.** The gate does not cover fuzzing or mutation
+testing. A green gate means the checks in `scripts/ci/gate.sh` passed; it says
+nothing about whether the fuzzer has found something since, and mutation
+testing is enforced on two files only — the injection boundary and the sandbox
+rule — with the rest of the workspace reported as information and no threshold
+applied.
+
 ### The one check that is not in the gate
 
 Commit messages. `committed` enforces Conventional Commits, and it runs in CI
@@ -174,6 +218,8 @@ regenerates it, and it is not edited by hand.
 | Editor defaults, mirroring the formatters | `.editorconfig` |
 | Commit-message rules, and every departure from the tool's defaults | `committed.toml` |
 | Changelog grouping and templates | `cliff.toml` |
+| Mutation-testing exclusions, each with a reason | `.cargo/mutants.toml` |
+| Fuzz targets, and the crate deliberately outside the workspace | `fuzz/` |
 | What CI runs, and the SHA every action is pinned to | `.github/workflows/ci.yml` |
 | Dependency update schedule | `.github/dependabot.yml` |
 

@@ -126,8 +126,24 @@ Linux-oriented.
 
 Three consequences, taken deliberately:
 
-1. **`fuzz/` is its own workspace**, as `cargo fuzz init` generates it. It is
-   not a member of the root workspace.
+1. **`fuzz/` is kept out of the root workspace — deliberately, by us.**
+
+   **Corrected during apply.** This point previously read "`fuzz/` is its own
+   workspace, as `cargo fuzz init` generates it". That is false, and has been
+   since cargo-fuzz 0.11.4 (January 2024): the generated `fuzz/Cargo.toml` no
+   longer carries a `[workspace]` table, and the parent manifest is not
+   touched. Isolation is therefore something this change must *create*, not
+   something it inherits — which matters, because D6's entire licence argument
+   rests on it.
+
+   Two further consequences of this repository's shape, also found during
+   apply. The root manifest is **virtual** (`[workspace]` with no `[package]`),
+   so the `path = ".."` dependency `cargo fuzz init` generates cannot resolve
+   and must be pointed at a real crate by hand. And `members` is
+   `["crates/*", "xtask"]`, which does not match `fuzz/`, but an unexcluded
+   nested manifest is still an error the moment cargo notices it — so the root
+   gains an explicit `exclude = ["fuzz"]` rather than relying on the glob
+   happening not to match.
 2. **Fuzzing is not a gate job.** `scripts/ci/gate.sh` runs on the pinned stable
    toolchain and every job in it terminates. Fuzzing does neither. It runs as a
    scheduled CI workflow on nightly with a per-target time budget.
@@ -165,7 +181,11 @@ NCSA is absent from `deny.toml`. Two ways out:
   it to accommodate a test tool that never ships would spend that guarantee on
   the least important consumer of it.
 - **Keep `fuzz/` out of the root workspace**, so `cargo deny` never evaluates
-  it. This is what D5 already does for unrelated reasons.
+  it. D5 arranges this — though note the correction recorded there: the
+  isolation is not inherited from `cargo fuzz init`, it is created by an
+  explicit `exclude = ["fuzz"]` in the root manifest. The licence argument
+  below depends on that line actually being present, so it is a task step with
+  a verification, not an assumption.
 
 The second is chosen — but *relying on invisibility is not a policy*. So
 `deny.toml` gains a comment recording that the fuzz crate is out of scope, that
@@ -222,7 +242,14 @@ be theatre. The alternative in the other direction, a scheduled job with no
 failure condition at all, produces a report nobody reads, which is the same
 outcome as not running it.
 
-Exclusions live in `mutants.toml`, each with a written reason, per `AGENTS.md`.
+Exclusions live in `.cargo/mutants.toml`, each with a written reason, per
+`AGENTS.md`. **Corrected during apply:** this said `mutants.toml` at the repo
+root; cargo-mutants reads `.cargo/mutants.toml`. That directory already exists
+here — it holds `audit.toml` — so the correction is a path, not a new
+convention. Note also that `#[mutants::skip]` takes **no** `reason` argument;
+a reason is a neighbouring comment, and the attribute would require the
+`mutants` crate as a *regular* dependency. Config-file exclusion is preferred
+precisely because it needs no dependency at all.
 
 ### D9 — Nothing here relaxes the coverage floor
 

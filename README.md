@@ -110,6 +110,31 @@ because the layer table is particular to this codebase and no tool can know it.
 
 Coverage currently sits at about 96%. The floor is a fixed 90%, not a ratchet.
 
+### Beyond the gate
+
+Coverage says a line ran. It does not say the line is right, and it says
+nothing about the inputs nobody thought to write down. Three instruments cover
+what it misses:
+
+- **Property tests** (`proptest`) — part of the ordinary suite, so they run in
+  the gate. The two security-relevant rules are stated as properties rather
+  than examples: everything reaching the output through
+  `markup::string_literal` survives a round trip, and a path is judged by where
+  it resolves rather than how it is spelled. Counterexamples are saved to
+  `proptest-regressions/` and committed.
+- **Fuzzing** (`cargo-fuzz`, weekly, **needs nightly**) — throws arbitrary
+  bytes at the parse → plan → emit path looking for a panic or a hang. It has
+  already found one: `asciidoc-parser` 0.29.19 does not terminate on a document
+  containing only a vertical tab or form feed. That is guarded against, and the
+  reproducer is a permanent test.
+- **Mutation testing** (`cargo-mutants`, weekly) — breaks the code on purpose
+  and checks a test notices. Enforced on the injection boundary and the sandbox
+  rule; reported without a threshold everywhere else.
+
+Neither fuzzing nor mutation testing is part of `scripts/ci/gate.sh`, and a
+green gate does not claim otherwise. Both take far longer than a merge should
+wait, and fuzzing cannot run on the pinned toolchain at all.
+
 Two configuration files are worth knowing about. `deny.toml` holds the licence
 allow-list — strong copyleft is absent by construction, so a dependency
 offering only GPL or MPL fails the build. `.cargo/audit.toml` records the two

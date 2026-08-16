@@ -1,0 +1,102 @@
+# Scheduled mutation testing.
+#
+# Coverage says a line ran. Mutation testing asks whether anything would have
+# noticed if that line were wrong, which is the question a 95% coverage figure
+# does not answer. It is not a gate job because it re-runs the test suite once
+# per mutant and takes far longer than a merge should wait on.
+#
+# The failure condition is deliberately narrow. Only two files are enforced:
+# the injection boundary and the sandbox rule. Both are security properties,
+# both now have property tests, and a surviving mutant in either means the
+# property does not actually constrain the code it claims to. Everywhere else
+# the report is published as information — a number to look at, not a threshold
+# to satisfy, because chasing a workspace-wide mutation score produces tests
+# written to kill mutants rather than to describe behaviour.
+
+name: mutants
+
+on:
+  schedule:
+    # Wednesdays, 04:23 UTC. Off the hour, and on a different day from the
+    # fuzzing run so the two do not queue behind each other.
+    - cron: "23 4 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  enforced:
+    name: no survivors in the two enforced files
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Install cargo-mutants
+        uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780 # v2.86.1
+        with:
+          tool: cargo-mutants@27.1.0
+
+      # This step is the gate on mutation testing, and its scope is exactly the
+      # two files named. A survivor here fails the workflow.
+      - name: Mutate the injection boundary and the sandbox rule
+        run: |
+          cargo mutants --no-shuffle \
+            --file crates/adocpdf-infra/src/markup.rs \
+            --file crates/adocpdf-domain/src/sandbox.rs
+
+      - name: Upload the enforced-file report
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: mutants-enforced
+          path: mutants.out/
+          if-no-files-found: ignore
+
+  survey:
+    name: workspace survey (information only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    # Independent of the job above: a survivor somewhere unenforced must not
+    # stop the enforced result from being reported, and vice versa.
+    continue-on-error: true
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Install cargo-mutants
+        uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780 # v2.86.1
+        with:
+          tool: cargo-mutants@27.1.0
+
+      # No threshold. The exit status is swallowed on purpose: this job exists
+      # to produce a report somebody reads, and turning it into a pass/fail
+      # would recreate the workspace-wide score this design rejected.
+      - name: Mutate the whole workspace
+        run: cargo mutants --no-shuffle || true
+
+      - name: Upload the workspace report
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: mutants-workspace
+          path: mutants.out/
+          if-no-files-found: ignore

@@ -2,6 +2,22 @@
 resolver = "3"
 members = [ "crates/*", "xtask" ]
 
+# `fuzz/` is deliberately not part of this workspace, and the exclusion is
+# written down rather than left to the `members` globs happening not to match
+# it.
+#
+# The reason is licensing. `libfuzzer-sys` is `(MIT OR Apache-2.0) AND NCSA` —
+# a conjunction, not a choice, so the permissive branch cannot be taken and
+# NCSA is not in `deny.toml`'s allow-list. Keeping the fuzz crate out of the
+# workspace keeps it out of the lockfile `cargo deny` reads, which is why the
+# allow-list does not have to be widened for a tool that never ships.
+#
+# `cargo fuzz init` does not arrange this: since cargo-fuzz 0.11.4 it no longer
+# writes a `[workspace]` table into the generated manifest and it does not
+# touch this file. See `fuzz/Cargo.toml`, which carries its own `[workspace]`
+# so it resolves independently.
+exclude = [ "fuzz" ]
+
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
@@ -22,6 +38,13 @@ thiserror = "2.0.20"
 # Test-only: reads back the PDFs the end-to-end tests produce, so their
 # assertions are about the artefact rather than about our own byte buffer.
 pdf-extract = "0.12.0"
+
+# Test-only: property-based testing. Used where a rule has to hold for every
+# input rather than for the examples someone thought of — the injection
+# boundary in `markup::string_literal` and the containment rule in
+# `domain::sandbox`. Both are security properties, and an example-based test
+# only ever proves the examples.
+proptest = "1.11.0"
 
 # Code quality is enforced by analyzers that already exist, configured here,
 # rather than by anything hand-written. A lint that is genuinely wrong for this

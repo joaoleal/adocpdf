@@ -172,4 +172,203 @@ mod tests {
     fn empty_text_is_an_empty_literal() {
         assert_eq!(string_literal(""), "\"\"");
     }
+
+    /// What `string_literal` must guarantee, stated for *every* input rather
+    /// than for the examples above.
+    ///
+    /// These are Tier 1: pure, no engine, no I/O, so they run at a high case
+    /// count in the ordinary suite. Tier 2 — compiling the literal through the
+    /// real engine — lives in `tests/injection.rs`, where it can afford far
+    /// fewer cases.
+    mod properties {
+        use proptest::prelude::*;
+
+        use super::{interior_has_no_unescaped_quote, string_literal};
+
+        /// Characters chosen to hit every arm of the escaper.
+        ///
+        /// `any::<char>()` is not used, and neither is `any::<String>()`: the
+        /// latter is the regex `\PC*`, which excludes control characters
+        /// entirely and would leave the `\n`, `\r`, `\t` and `\u{...}` arms —
+        /// the reason the function exists — never exercised.
+        fn interesting_char() -> impl Strategy<Value = char> {
+            prop_oneof![
+                // The two characters that can terminate or re-interpret a
+                // literal. Weighted heavily: they are the whole risk.
+                4 => Just('"'),
+                4 => Just('\\'),
+                // The three control characters with a short escape.
+                3 => prop_oneof![Just('\n'), Just('\r'), Just('\t')],
+                // Control characters that must become `\u{...}`. C0 and C1,
+                // which is exactly what `char::is_control` covers.
+                3 => prop_oneof![(0u32..0x20), (0x7fu32..0xa0)]
+                    .prop_map(|c| char::from_u32(c).expect("C0 and C1 are valid scalar values")),
+                // Ordinary text, and non-ASCII that must pass through
+                // untouched — including characters that are invisible but not
+                // `is_control`, which the escaper deliberately does not touch.
+                8 => prop_oneof![
+                    any::<char>(),
+                    Just('\u{2028}'),
+                    Just('\u{feff}'),
+                    Just('\u{200b}'),
+                    Just('é'),
+                    Just('中'),
+                    Just('🙂'),
+                ],
+            ]
+        }
+
+        fn interesting_text() -> impl Strategy<Value = String> {
+            proptest::collection::vec(interesting_char(), 0..40)
+                .prop_map(|characters| characters.into_iter().collect())
+        }
+
+        /// Reads a literal back to the text it was made from.
+        ///
+        /// Deliberately written here rather than exported from the module
+        /// under test: an inverse derived from the same code could agree with
+        /// a bug. This one is written from the *format*, so disagreement is
+        /// evidence.
+        fn decode(literal: &str) -> Result<String, String> {
+            let mut characters = literal.chars();
+
+            if characters.next() != Some('"') {
+                return Err("literal does not open with a quote".to_owned());
+            }
+
+            let mut out = String::new();
+            let mut closed = false;
+
+            while let Some(character) = characters.next() {
+                match character {
+                    '"' => {
+                        closed = true;
+                        break;
+                    }
+                    '\\' => {
+                        let escaped = characters
+                            .next()
+                            .ok_or_else(|| "trailing backslash".to_owned())?;
+                        match escaped {
+                            '"' => out.push('"'),
+                            '\\' => out.push('\\'),
+                            'n' => out.push('\n'),
+                            'r' => out.push('\r'),
+                            't' => out.push('\t'),
+                            'u' => {
+                                if characters.next() != Some('{') {
+                                    return Err("\\u not followed by {".to_owned());
+                                }
+                                let mut hex = String::new();
+                                loop {
+                                    match characters.next() {
+                                        Some('}') => break,
+                                        Some(digit) => hex.push(digit),
+                                        None => return Err("unterminated \\u{".to_owned()),
+                                    }
+                                }
+                                let code = u32::from_str_radix(&hex, 16)
+                                    .map_err(|_| format!("`{hex}` is not hex"))?;
+                                out.push(
+                                    char::from_u32(code)
+                                        .ok_or_else(|| format!("{code} is not a scalar value"))?,
+                                );
+                            }
+                            other => return Err(format!("unknown escape `\\{other}`")),
+                        }
+                    }
+                    other => out.push(other),
+                }
+            }
+
+            if !closed {
+                return Err("literal does not close with a quote".to_owned());
+            }
+            if characters.next().is_some() {
+                return Err("text follows the closing quote".to_owned());
+            }
+            Ok(out)
+        }
+
+        proptest! {
+            /// The literal is delimited, and the delimiters are the only two
+            /// bare quotes in it. If a quote in the body were unescaped, the
+            /// literal would end early and everything after it would be read
+            /// as markup — which is the injection this module exists to
+            /// prevent.
+            #[test]
+            fn the_literal_opens_and_closes_with_the_only_bare_quotes(
+                text in interesting_text()
+            ) {
+                let literal = string_literal(&text);
+
+                prop_assert!(literal.starts_with('"'), "no opening quote: {literal:?}");
+                prop_assert!(literal.ends_with('"'), "no closing quote: {literal:?}");
+                prop_assert!(literal.len() >= 2, "too short to be delimited: {literal:?}");
+                prop_assert!(
+                    interior_has_no_unescaped_quote(&literal),
+                    "an unescaped quote in the body of {literal:?}"
+                );
+            }
+
+            /// Every backslash in the body opens a valid escape. A stray one
+            /// would either consume the closing quote or leave a meaning the
+            /// engine gets to choose.
+            #[test]
+            fn every_backslash_in_the_body_opens_a_known_escape(text in interesting_text()) {
+                let literal = string_literal(&text);
+                let body: Vec<char> = literal.chars().collect();
+                let body = &body[1..body.len() - 1];
+
+                let mut index = 0;
+                while index < body.len() {
+                    if body[index] == '\\' {
+                        let next = body.get(index + 1);
+                        prop_assert!(
+                            matches!(next, Some('"' | '\\' | 'n' | 'r' | 't' | 'u')),
+                            "backslash opens {next:?}, not a known escape, in {literal:?}"
+                        );
+                        index += 2;
+                    } else {
+                        index += 1;
+                    }
+                }
+            }
+
+            /// No raw control character survives into the output. One would
+            /// either terminate the literal or travel invisibly into the
+            /// document.
+            #[test]
+            fn no_raw_control_character_reaches_the_output(text in interesting_text()) {
+                let literal = string_literal(&text);
+
+                for character in literal.chars() {
+                    prop_assert!(
+                        !character.is_control(),
+                        "raw control character {:?} (U+{:04X}) in {literal:?}",
+                        character,
+                        character as u32
+                    );
+                }
+            }
+
+            /// The escaping loses nothing and adds nothing. This is the
+            /// property the other three are worth having: the reader sees
+            /// exactly the source text, whatever it contained.
+            #[test]
+            fn the_literal_decodes_back_to_exactly_the_input(text in interesting_text()) {
+                let literal = string_literal(&text);
+
+                match decode(&literal) {
+                    Ok(decoded) => prop_assert_eq!(
+                        decoded,
+                        text,
+                        "round trip changed the text, via {}",
+                        literal
+                    ),
+                    Err(reason) => prop_assert!(false, "{reason}, in {literal:?}"),
+                }
+            }
+        }
+    }
 }

@@ -23,6 +23,11 @@
 /bom.json
 /bom.xml
 
+# Mutation testing output. `cargo mutants` writes a full build and test log per
+# mutant; the summary is what matters and CI publishes it as an artifact.
+/mutants.out
+/mutants.out.old
+
 # Profiling and debugging output.
 perf.data
 perf.data.old
