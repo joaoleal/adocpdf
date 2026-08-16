@@ -9,15 +9,26 @@ not edit by hand — a release regenerates it.
 
 - Render AsciiDoc to PDF via an embedded Typst engine
 
+### Bug fixes
+
+- *(infra)* Refuse input that asciidoc-parser cannot finish parsing
+
 ### Documentation
 
 - Add the OpenSpec planning artifacts and agent tooling
 - *(openspec)* Record the first CI run in bootstrap-repository
 - *(openspec)* Archive bootstrap-repository
+- *(openspec)* Archive shipping-hygiene
+- *(openspec)* Archive behavioural-testing and the parser guard
+
+### Testing
+
+- State the security rules as properties, and go looking for inputs
 
 ### Build system
 
 - Add the pre-merge quality gate and licensing paperwork
+- Make the shipped artefact auditable and give history a changelog
 
 ### Continuous integration
 
