@@ -1,0 +1,14 @@
+= Themed Document
+
+Body text set in the default theme, on the first page.
+
+[theme=large-print]
+== Set Larger
+
+This section changes typography only, so it must continue on the same page
+rather than starting a new one.
+
+[theme=wide]
+== Turned Sideways
+
+This section changes page geometry, so it must start a new page.

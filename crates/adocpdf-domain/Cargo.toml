@@ -1,0 +1,15 @@
+[package]
+name = "adocpdf-domain"
+description = "Entities, value objects, ports and use cases. Names no external technology."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+adocpdf-core = { path = "../adocpdf-core", version = "0.1.0" }
+thiserror.workspace = true
+
+[lints]
+workspace = true

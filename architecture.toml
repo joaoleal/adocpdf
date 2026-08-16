@@ -1,0 +1,45 @@
+# The dependency rule, stated once, in data.
+#
+# The guard test in `xtask` reads this file, parses every crate manifest under
+# `crates/`, and fails the build when a manifest declares a dependency this file
+# does not permit. Both lists are exhaustive: anything not named is a violation,
+# so adding a dependency is a deliberate edit here rather than a silent one in a
+# manifest.
+#
+# `workspace` — which other crates in this workspace the crate may depend on.
+#               Dependencies flow strictly inward; a crate must never appear in
+#               the allowed set of a crate it depends on, and no crate may
+#               depend on a delivery crate.
+# `external`  — which third-party crates it may depend on. This is what keeps
+#               the layout engine and the AsciiDoc parser confined to the
+#               infrastructure layer.
+#
+# Both apply to `[dependencies]` and `[dev-dependencies]` alike: a test that
+# reaches outward breaks the layering just as a library that does.
+
+[crates.adocpdf-core]
+workspace = [  ]
+external = [  ]
+
+[crates.adocpdf-domain]
+workspace = [ "adocpdf-core" ]
+external = [ "thiserror" ]
+
+[crates.adocpdf-shared]
+workspace = [ "adocpdf-core" ]
+external = [  ]
+
+[crates.adocpdf-infra]
+workspace = [ "adocpdf-core", "adocpdf-domain", "adocpdf-shared" ]
+external = [ "typst", "typst-layout", "typst-pdf", "asciidoc-parser", "thiserror" ]
+
+[crates.adocpdf-cli]
+workspace = [ "adocpdf-core", "adocpdf-domain", "adocpdf-shared", "adocpdf-infra" ]
+# `pdf-extract` is test-only: the end-to-end tests read back the PDF they
+# produced, so what they assert on is the artefact rather than a buffer this
+# code already held.
+external = [ "clap", "thiserror", "pdf-extract" ]
+
+[crates.adocpdf-wasm]
+workspace = [ "adocpdf-core", "adocpdf-domain", "adocpdf-shared", "adocpdf-infra" ]
+external = [  ]

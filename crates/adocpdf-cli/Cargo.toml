@@ -1,0 +1,24 @@
+[package]
+name = "adocpdf-cli"
+description = "Command-line delivery. A composition root: constructs adapters and injects them."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "adocpdf"
+path = "src/main.rs"
+
+[dependencies]
+adocpdf-domain = { path = "../adocpdf-domain", version = "0.1.0" }
+adocpdf-shared = { path = "../adocpdf-shared", version = "0.1.0" }
+adocpdf-infra = { path = "../adocpdf-infra", version = "0.1.0" }
+clap.workspace = true
+
+[dev-dependencies]
+pdf-extract.workspace = true
+
+[lints]
+workspace = true

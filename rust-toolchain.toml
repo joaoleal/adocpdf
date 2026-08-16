@@ -1,0 +1,8 @@
+[toolchain]
+channel = "1.97.1"
+# `llvm-tools-preview` supplies the instrumentation `cargo llvm-cov` reads.
+# Pinning it here means a fresh checkout can measure coverage without a
+# separate `rustup component add`.
+components = [ "clippy", "rustfmt", "llvm-tools-preview" ]
+targets = [ "wasm32-unknown-unknown", "wasm32-wasip1" ]
+profile = "minimal"

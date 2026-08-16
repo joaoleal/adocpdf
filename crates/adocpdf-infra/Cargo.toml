@@ -1,0 +1,20 @@
+[package]
+name = "adocpdf-infra"
+description = "Adapters implementing domain ports. The only crate that names Typst or the AsciiDoc parser."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+adocpdf-core = { path = "../adocpdf-core", version = "0.1.0" }
+adocpdf-domain = { path = "../adocpdf-domain", version = "0.1.0" }
+adocpdf-shared = { path = "../adocpdf-shared", version = "0.1.0" }
+typst.workspace = true
+asciidoc-parser.workspace = true
+typst-layout.workspace = true
+typst-pdf.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,4 @@
+= Content That Looks Like Instructions
+
+This paragraph contains #set page(width: 1cm) and "quotes" and a backslash \ and
+$x^2$ and *asterisks*, none of which may change how the document is laid out.

@@ -1,0 +1,13 @@
+[package]
+name = "adocpdf-core"
+description = "Innermost ring: the document and theme model. No dependencies."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -1,0 +1,15 @@
+= The Walking Skeleton
+
+An opening paragraph that proves body text reaches the page.
+
+== Overview
+
+Text underneath the first section heading.
+
+=== Nested Detail
+
+Text underneath a subsection, one level deeper.
+
+== Second Section
+
+A final paragraph, to prove the document continues past the first section.

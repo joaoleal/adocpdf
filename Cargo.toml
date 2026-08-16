@@ -1,0 +1,95 @@
+[workspace]
+resolver = "3"
+members = [ "crates/*", "xtask" ]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "Apache-2.0"
+repository = "https://github.com/joaoleal/asciidoc-rust"
+
+[workspace.dependencies]
+# Third-party versions are declared once here and inherited by member crates,
+# so the architecture guard can check which layer pulls in what.
+typst = "0.15.1"
+typst-layout = "0.15.1"
+typst-pdf = "0.15.1"
+asciidoc-parser = "0.29.19"
+clap = { version = "4.6.6", features = [ "derive" ] }
+thiserror = "2.0.20"
+
+# Test-only: reads back the PDFs the end-to-end tests produce, so their
+# assertions are about the artefact rather than about our own byte buffer.
+pdf-extract = "0.12.0"
+
+# Code quality is enforced by analyzers that already exist, configured here,
+# rather than by anything hand-written. A lint that is genuinely wrong for this
+# codebase is turned off once, below, with a reason — never scattered as
+# `#[allow]` attributes where nobody can find them.
+
+[workspace.lints.rust]
+# Groups. `priority = -1` lets the individual lints below override them.
+future_incompatible = { level = "warn", priority = -1 }
+rust_2018_idioms = { level = "warn", priority = -1 }
+let_underscore = { level = "warn", priority = -1 }
+
+unsafe_code = "forbid"
+missing_docs = "warn"
+unreachable_pub = "warn"
+missing_debug_implementations = "warn"
+trivial_casts = "warn"
+trivial_numeric_casts = "warn"
+unused_qualifications = "warn"
+unused_lifetimes = "warn"
+unused_import_braces = "warn"
+
+[workspace.lints.clippy]
+# Groups, weakest first. Later entries win where they overlap.
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+
+# From `restriction`, which is deliberately not adopted wholesale — its lints
+# contradict each other by design. These are the ones that catch real mistakes.
+todo = "warn"
+unimplemented = "warn"
+dbg_macro = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+indexing_slicing = "warn"
+mem_forget = "warn"
+exit = "warn"
+
+# --- exceptions, each stated once, with its reason ---------------------------
+
+# The dependency tree holds two versions of several crates because the layout
+# engine and the AsciiDoc parser were released against different minors of
+# their shared dependencies. Nothing here can fix that, and `cargo-deny`
+# already reports duplicates as a warning where they can be reviewed with the
+# full graph in view.
+multiple_crate_versions = "allow"
+
+# Directly contradicts rustc's `unreachable_pub`, which is enabled above:
+# `unreachable_pub` asks for `pub(crate)` on items that cannot be reached from
+# outside, and this lint asks for `pub` on those same items when their module
+# is private. One of the two has to lose. `unreachable_pub` is kept because it
+# states the item's real visibility rather than its syntactic minimum.
+redundant_pub_crate = "allow"
+
+# Declaring a function `const` is a promise about future implementations, not a
+# local formatting choice: it constrains what the body may ever do, and
+# withdrawing it is a breaking change. Almost every hit is a field accessor,
+# where the benefit is nil and the commitment is permanent.
+missing_const_for_fn = "allow"
+
+# Wants `readme`, `keywords` and `categories` on every crate. Only the binary
+# is meant to be published; the library crates carry version numbers so that
+# `cargo-deny` sees no wildcards, not because they are destined for crates.io.
+# Inventing per-crate READMEs to satisfy a lint would leave real files nobody
+# maintains.
+cargo_common_metadata = "allow"
+
+[profile.release]
+lto = "thin"
