@@ -1,0 +1,30 @@
+# Spellchecking for source, comments and documentation.
+#
+# This codebase carries an unusual amount of prose — the reasoning behind a
+# decision lives next to the code implementing it — so a spellchecker earns its
+# place here more than it would in a terser project.
+
+[files]
+# Vendored text and binary assets are not ours to correct. The DejaVu licence
+# in particular must stay byte-for-byte as published.
+extend-exclude = [
+    "target/",
+    "Cargo.lock",
+    "LICENSE",
+    "crates/adocpdf-infra/assets/",
+    "openspec/changes/*/specs/",
+]
+
+[default.extend-words]
+# British spellings used deliberately and consistently throughout: "licence"
+# the noun, "behaviour", "artefact". `typos` accepts them already, but naming
+# them here records that the inconsistency would be the mistake.
+licence = "licence"
+licences = "licences"
+behaviour = "behaviour"
+artefact = "artefact"
+artefacts = "artefacts"
+
+[default.extend-identifiers]
+# Real identifiers that look like typos.
+adocpdf = "adocpdf"

@@ -1,0 +1,41 @@
+# Formatting policy, stated rather than inherited.
+#
+# Every value here is rustfmt's current default. Writing them down is the point:
+# a default is whatever the toolchain happens to do this release, and this file
+# turns that into a decision the project has made. `cargo fmt --check` produced
+# no diff when this file was added, so nothing was reformatted to suit it.
+#
+# Only stable options appear. Several tempting settings — `group_imports`,
+# `imports_granularity`, `wrap_comments` — are nightly-only, and would be
+# silently ignored on the pinned stable toolchain, which is worse than not
+# configuring them: the file would describe a policy nothing enforces.
+
+# Match the language edition the crates declare, so formatting follows the same
+# rules the compiler does.
+edition = "2024"
+style_edition = "2024"
+
+# Line width. 100 is rustfmt's default and matches the width the comments and
+# doc comments in this codebase are already wrapped to.
+max_width = 100
+
+# Spaces, four of them. Stated because a mixed-indentation diff is the least
+# reviewable thing a repository can produce.
+hard_tabs = false
+tab_spaces = 4
+
+# Unix line endings regardless of the machine formatting the code, so a
+# checkout on another platform does not produce a whole-file diff.
+newline_style = "Unix"
+
+# Keep imports and module declarations in a deterministic order. Without these
+# two, import order becomes a matter of who edited the file last.
+reorder_imports = true
+reorder_modules = true
+
+# Collapse `#[derive(A)] #[derive(B)]` into one attribute.
+merge_derives = true
+
+# Prefer `?` to `try!`, and `Foo { x }` to `Foo { x: x }`.
+use_try_shorthand = true
+use_field_init_shorthand = true

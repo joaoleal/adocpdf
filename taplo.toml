@@ -1,0 +1,19 @@
+# TOML policy. This repository now configures a great deal in TOML —
+# manifests, the layer table, the licence allow-list, lint thresholds — and a
+# malformed or inconsistently laid out file in that set is a real hazard.
+
+include = [ "**/*.toml" ]
+exclude = [ "target/**" ]
+
+[formatting]
+# Keep entries in the order they were written. Alphabetising would scramble
+# groupings that carry meaning: `deny.toml` groups licences by why they are
+# permitted, and `architecture.toml` lists layers inward-out.
+reorder_keys = false
+reorder_arrays = false
+
+# Match rustfmt's width so a TOML file and a Rust file wrap at the same column.
+column_width = 100
+indent_string = "    "
+align_entries = false
+compact_arrays = false

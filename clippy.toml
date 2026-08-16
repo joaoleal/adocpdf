@@ -1,0 +1,19 @@
+# `..` keeps clippy's default list and extends it. These are names of formats and
+# projects that appear in prose, not code items, so `doc_markdown` must not ask
+# for backticks around them.
+doc-valid-idents = [ "AsciiDoc", "AsciiDoctor", "DejaVu", "PostScript", "WebAssembly", ".." ]
+
+# Complexity limits. These are the off-the-shelf answer to "is this function
+# doing too much" — the concern an earlier draft of this project tried to reach
+# with a hand-written per-file line counter, which was deleted in favour of
+# these. Function size is the better measure anyway: a long file of short, clear
+# functions is fine; a short file holding one sprawling function is not.
+
+# Lines in a single function body. Set below the file limit on purpose: a
+# function approaching the size of a whole file is the thing being prevented.
+too-many-lines-threshold = 60
+
+# Roughly, the number of independent paths through a function. The default is
+# 25, which tolerates a great deal of nesting; 15 still allows a match over a
+# domain enum with a guard or two, and pushes back on anything past that.
+cognitive-complexity-threshold = 15

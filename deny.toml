@@ -1,0 +1,84 @@
+# Dependency policy: which licences may appear in the tree, and which crates
+# may not.
+#
+# Security advisories are deliberately NOT configured here. `cargo-audit` owns
+# them — see design decision D2a in the quality-gates change. Two tools reading
+# the same RUSTSEC database would disagree about severity eventually, and
+# silencing an advisory would then have to be done twice, in two syntaxes.
+
+[graph]
+# Check the dependency graph for the platforms actually built for. Anything
+# reachable only on another target cannot end up in a binary shipped from here.
+targets = [ "x86_64-unknown-linux-gnu", "wasm32-unknown-unknown", "wasm32-wasip1" ]
+
+[licenses]
+# Every licence permitted in the tree, listed explicitly. A dependency whose
+# licence is absent fails the build, so adding one is a deliberate, reviewed
+# edit rather than something that arrives with a transitive bump.
+#
+# Derived from a survey of the actual tree, not from memory: an allow-list
+# written from expectation would have missed Unicode-3.0 (27 crates, via ICU)
+# and the LLVM exception on the compiler-builtins path.
+allow = [
+    # The overwhelming majority of the tree, and the project's own licence.
+    # Apache-2.0 is not a free choice here: the embedded Typst engine is
+    # Apache-2.0 only. See LICENSING.md.
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+
+    # Permissive, and present via smaller transitive dependencies.
+    "0BSD",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "Zlib",
+
+    # Public-domain dedications.
+    "CC0-1.0",
+    "Unlicense",
+
+    # The Unicode licence, via the ICU crates that the layout engine pulls in
+    # for text segmentation. Permissive; noted in design.md as the entry to
+    # raise if the licensing posture is ever reviewed by counsel.
+    "Unicode-3.0",
+]
+
+# Strong copyleft is absent by construction — GPL, AGPL, LGPL and MPL are simply
+# not on the list above, so any crate offering only those fails the check.
+#
+# Two crates in the tree do name a copyleft licence, and both are disjunctions
+# offering a permissive alternative, which the allow-list selects:
+#
+#   self_cell  Apache-2.0 OR GPL-2.0-only            (via asciidoc-parser)
+#   r-efi      MIT OR Apache-2.0 OR LGPL-2.1-or-later (UEFI targets only)
+#
+# Neither obliges this project to anything copyleft. They are recorded here so
+# that a future reader does not rediscover them and assume something is wrong.
+
+# A licence detected with lower confidence than this is treated as unknown
+# rather than guessed at.
+confidence-threshold = 0.9
+
+[bans]
+# Duplicate versions are a warning, not an error: this tree legitimately holds
+# two versions of some crates because the layout engine and the AsciiDoc parser
+# were released against different minors. Failing on that would mean waiting on
+# upstream releases to make an unrelated change.
+multiple-versions = "warn"
+
+# A wildcard version requirement means "whatever resolves today", which makes
+# builds non-reproducible. The determinism requirement forbids that.
+wildcards = "deny"
+
+# Intra-workspace `path` dependencies are exempt. They carry no version
+# requirement because there is nothing to resolve: the workspace pins them by
+# containing them, and they are never published. Treating them as wildcards
+# would flag every layer boundary in the project as a reproducibility risk.
+allow-wildcard-paths = true
+
+[sources]
+# Everything must come from the public registry. A git or unknown-registry
+# dependency would sidestep both the licence policy above and `cargo-audit`.
+unknown-registry = "deny"
+unknown-git = "deny"

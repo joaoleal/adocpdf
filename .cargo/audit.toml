@@ -1,0 +1,64 @@
+# `cargo-audit` configuration.
+#
+# This file exists for one purpose: to record two advisories that cannot be
+# fixed from this repository, along with the argument for tolerating them and
+# the condition that should end that tolerance.
+#
+# Everything not listed here still fails the gate. The ignore list is two
+# specific advisory IDs, not a severity threshold and not a crate-wide
+# exemption, so a *new* advisory against quick-xml — or any other crate — still
+# stops the build.
+
+[advisories]
+ignore = [
+    # ---------------------------------------------------------------------
+    # RUSTSEC-2026-0194  quick-xml: quadratic run time when checking a start
+    #                    tag for duplicate attribute names          (7.5 high)
+    # RUSTSEC-2026-0195  quick-xml: unbounded namespace-declaration
+    #                    allocation enables memory exhaustion       (7.5 high)
+    #
+    # WHY THESE CANNOT BE FIXED HERE
+    #
+    # The dependency path is:
+    #
+    #     adocpdf-infra -> typst -> typst-library -> hayagriva
+    #                   -> citationberg -> quick-xml 0.38.4
+    #
+    # Both advisories are fixed in quick-xml 0.41.0. `citationberg 0.7.0`
+    # requires `quick-xml ^0.38.1`, which is semver-incompatible with the fix,
+    # so the upgrade has to come from upstream: citationberg, then hayagriva,
+    # then typst-library. `[patch.crates-io]` cannot help — cargo refuses to
+    # patch a crates.io crate with another crates.io version, so the only
+    # mechanical route would be maintaining a fork of an XML parser.
+    #
+    # WHY THE RISK IS ACCEPTED
+    #
+    # Both are denial-of-service in an XML parser that this application does
+    # not reach. Three independent reasons, each sufficient on its own:
+    #
+    #   1. quick-xml is used by citationberg to parse CSL citation-style
+    #      files. `adocpdf` emits no bibliography or citation constructs at
+    #      all — the emitter produces only page, text, par, heading, align and
+    #      v instructions.
+    #   2. Document content is emitted as string literals, so a document
+    #      cannot invoke a citation function either. See
+    #      `adocpdf-infra::markup`.
+    #   3. `World::file` refuses every file id except the main document, so no
+    #      `.csl` or `.bib` could be loaded even if a citation were somehow
+    #      invoked. Proven by `world::tests::an_unknown_file_is_refused`.
+    #
+    # This is an argument about reachability, not a proof, which is why it is
+    # written down here rather than assumed.
+    #
+    # WHEN TO REMOVE THESE
+    #
+    # As soon as the dependency tree resolves quick-xml >= 0.41.0. Check with:
+    #
+    #     cargo tree -i quick-xml
+    #
+    # If only the fixed version appears, delete both entries and this comment.
+    # A Typst upgrade is the most likely trigger.
+    # ---------------------------------------------------------------------
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]

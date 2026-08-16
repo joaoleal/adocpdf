@@ -1,0 +1,43 @@
+# Build output.
+/target
+
+# Coverage instrumentation. `cargo llvm-cov` writes raw profiles beside the
+# build and an lcov report wherever it is pointed; none of it is reproducible
+# input, so none of it belongs in the repository.
+*.profraw
+*.profdata
+/lcov.info
+/coverage
+/target/llvm-cov
+/target/llvm-cov-target
+/target/nextest
+
+# Profiling and debugging output.
+perf.data
+perf.data.old
+flamegraph.svg
+*.heaptrack.*
+
+# Editors. These are personal choices about how to read the code, not facts
+# about the project, so they stay out of shared history.
+/.vscode
+/.idea
+*.iml
+*.swp
+*.swo
+*~
+\#*\#
+.\#*
+
+# Operating systems.
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+Desktop.ini
+
+# Local environment overrides.
+/.env
+/.env.local
