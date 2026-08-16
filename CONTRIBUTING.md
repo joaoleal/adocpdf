@@ -142,20 +142,38 @@ Two rules are easy to break and worth repeating:
 
 See `AGENTS.md` for the full conventions.
 
-## Repository settings this repository expects
+## Repository settings
 
-These are configured in GitHub's web interface and cannot be set from the
-codebase. If you maintain a fork, they are worth turning on:
+These cannot be set from the codebase. They are all **enabled** on this
+repository; the list is here so a fork knows what to turn on, and so anyone
+wondering why a push was refused finds the answer.
 
 - **Branch protection on `main`**, with the `quality gate` status check
   required. That is the name of the *job* in `.github/workflows/ci.yml`, not of
   the workflow — GitHub reports status by job name, and requiring a check named
   `gate` would wait forever for one that never reports.
-- **Required pull requests** — no direct pushes to `main`.
+- **Required pull requests** — no direct pushes to `main`. Zero approvals are
+  required, deliberately: a sole maintainer cannot approve their own pull
+  request, so demanding one would deadlock the repository. The gate is what
+  guards the branch; the review requirement exists to force the change through
+  CI, not to simulate a second person.
+- **Signed commits required.** Every commit on `main` must carry a valid
+  signature. Set `commit.gpgsign` and a `user.signingkey` before you start, or
+  your work will not be mergeable. Commits GitHub creates itself — Dependabot's,
+  and anything merged through the web interface — are signed with its own key
+  and satisfy this.
+- **Linear history required.** Merge commits are refused, so land work by
+  squashing or rebasing. This keeps `git-cliff`'s changelog readable, since a
+  merge commit carries no Conventional Commits type.
+- **Force pushes and branch deletion blocked** on `main`.
 - **Private vulnerability reporting** enabled, so the *Report a vulnerability*
   form referenced by `SECURITY.md` actually appears.
 - **Dependabot alerts and security updates** enabled, complementing the
   scheduled version updates configured in `.github/dependabot.yml`.
+
+Administrators are not exempt from the status check by configuration, but
+`enforce_admins` is off, so a maintainer retains a manual override for an
+emergency. Using it should be rare enough to be worth explaining afterwards.
 
 ## Reporting a vulnerability
 
