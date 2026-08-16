@@ -91,6 +91,29 @@ docs: ...    test: ...    refactor: ...    chore: ...
 Explain *why* in the body. The subject says what changed; the body is where a
 future reader finds out what you were weighing.
 
+This is enforced, and it is **the one check that is not in
+`scripts/ci/gate.sh`**. It runs in CI on pull requests, from
+`.github/workflows/commits.yml`. The gate checks the working tree — it can run
+before a commit exists, which is the situation it is normally run in — while a
+commit-message linter checks history, which the gate cannot see. There is no
+local hook either, because `--no-verify` would make it optional.
+
+Run it yourself before opening a pull request:
+
+```bash
+cargo install committed --locked     # install-action does not carry it
+committed <base>..HEAD               # your branch's commits
+```
+
+The rules are in `committed.toml`. Every value that departs from the tool's
+own defaults is written down there with the reason — notably that `build`,
+`ci` and `revert` are allowed types, and that subjects are lowercase after the
+type, matching this project's history and the example above.
+
+`CHANGELOG.md` is generated from that history by `git-cliff` (`cliff.toml`)
+when a release is cut. Do not edit it by hand, and do not regenerate it per
+commit — a changelog rewritten on every push conflicts on every merge.
+
 Never `git push` or `git merge` without the maintainer's explicit consent.
 Commit freely.
 
@@ -124,7 +147,10 @@ See `AGENTS.md` for the full conventions.
 These are configured in GitHub's web interface and cannot be set from the
 codebase. If you maintain a fork, they are worth turning on:
 
-- **Branch protection on `main`**, with the `gate` status check required.
+- **Branch protection on `main`**, with the `quality gate` status check
+  required. That is the name of the *job* in `.github/workflows/ci.yml`, not of
+  the workflow — GitHub reports status by job name, and requiring a check named
+  `gate` would wait forever for one that never reports.
 - **Required pull requests** — no direct pushes to `main`.
 - **Private vulnerability reporting** enabled, so the *Report a vulnerability*
   form referenced by `SECURITY.md` actually appears.

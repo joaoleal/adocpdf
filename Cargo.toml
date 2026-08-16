@@ -93,3 +93,55 @@ cargo_common_metadata = "allow"
 
 [profile.release]
 lto = "thin"
+# One codegen unit gives the optimiser the whole crate at once. It costs
+# release build time, which this project spends rarely.
+#
+# `lto` stays "thin" deliberately. Fat LTO is the obvious pairing and there is
+# no measurement here to justify its extra build time; this project has no
+# benchmark suite to produce one. Changing an optimisation setting because it
+# sounds stronger, with no number attached, is the thing this repository's
+# rules exist to prevent.
+codegen-units = 1
+
+# Debug info goes; the symbol table stays.
+#
+# SECURITY.md states that a panic on untrusted input is a vulnerability, and
+# the first artefact of such a report is a backtrace from a user. `strip =
+# "symbols"` would buy a little more size and turn every one of those reports
+# into a list of hex addresses.
+#
+# Two things were measured here rather than assumed.
+#
+# It does not break auditability: `cargo auditable` writes its manifest to a
+# linker section, and `cargo audit bin` still reads all 309 dependencies out of
+# the binary this produces. If that ever stops holding, auditability wins and
+# this line goes.
+#
+# It also currently saves nothing — 45,335,744 bytes with and without. The
+# release profile defaults to `debug = 0`, so there is no debug info to strip.
+# The line is kept as a guard: if anyone later turns `debug` on for release,
+# the shipped artefact does not silently grow a debug section.
+strip = "debuginfo"
+
+# `panic = "abort"` is deliberately absent, for three reasons.
+#
+# 1. It contradicts a requirement. Malformed source must not be fatal;
+#    aborting turns any residual bug on untrusted input into the most fatal
+#    outcome available, with no unwinding and no destructor run.
+# 2. It would make the tested configuration differ from the shipped one. The
+#    test harness needs unwinding, so tests keep `panic = "unwind"` whatever
+#    this says. Shipping a panic strategy no test ever exercises is the exact
+#    divergence the gate exists to prevent.
+# 3. The gain is small — some size and a little speed, against those two costs.
+
+# There is deliberately no [profile.dev.package."*"] opt-level here.
+#
+# It was tried and measured, not reasoned about. Compiling dependencies at
+# opt-level = 2 took a clean `cargo test --workspace` from 29s to 73s, to save
+# 0.09s of test execution — the whole suite only spends 0.16s running, the rest
+# is compilation. Amortising over warm rebuilds does not rescue it: 0.16s is the
+# entire budget the setting could ever recover.
+#
+# The premise was that an unoptimised layout engine dominates test wall-clock.
+# For this suite it does not. Revisit only if tests start doing enough real
+# layout work for execution time to become visible.

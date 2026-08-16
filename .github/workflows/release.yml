@@ -1,0 +1,94 @@
+# Release artefacts: a binary that can answer for itself, and an SBOM.
+#
+# Runs when a version tag is pushed, and on demand. Nothing here runs per
+# commit — an SBOM regenerated on every push is a file that changes on every
+# dependency bump and conflicts on every merge, which is why it is published
+# rather than committed (.gitignore refuses it).
+#
+# The binary is built with `cargo auditable`, which embeds a compressed
+# dependency manifest in a linker section. That is what makes `cargo audit bin
+# adocpdf` work on a downloaded file six months later. Verified during the
+# shipping-hygiene change: `strip = "debuginfo"` does not remove it.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  artefacts:
+    name: build artefacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustc --version
+
+      # No build cache here, deliberately, unlike the gate workflow. This job
+      # publishes artefacts, and a restored cache is mutable state that an
+      # earlier workflow run can write to — `zizmor`'s cache-poisoning audit
+      # flags exactly this shape. A release is rare and its provenance matters
+      # more than its wall-clock, so it builds from scratch.
+      - name: Install the release tools
+        uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780 # v2.86.1
+        with:
+          tool: >-
+            cargo-auditable@0.7.5,
+            cargo-cyclonedx@0.5.9,
+            cargo-audit
+
+      - name: Build the binary with an embedded dependency manifest
+        run: cargo auditable build --release --workspace
+
+      # Proves the embedding worked on the artefact actually being published,
+      # rather than trusting that it did. `cargo audit bin` prints "Found
+      # 'cargo auditable' data" when it reads the section, and falls back to
+      # scraping panic strings when there is none — so the grep is the check.
+      - name: Verify the embedded manifest is readable
+        run: |
+          set -euo pipefail
+          cargo audit bin target/release/adocpdf 2>&1 | tee /tmp/auditbin.txt || true
+          grep -q "Found 'cargo auditable' data" /tmp/auditbin.txt
+
+      # One SBOM per workspace member, written beside that member's
+      # Cargo.toml. cargo-cyclonedx has no --output flag, so they are collected
+      # afterwards rather than directed anywhere.
+      #
+      # Note the scope difference from the binary manifest above: this is
+      # generated from the lockfile, so it can list a crate the build never
+      # compiles (a feature-gated transitive dependency, say). It describes the
+      # resolved graph; the embedded manifest describes what was linked.
+      - name: Generate the CycloneDX SBOM
+        run: |
+          set -euo pipefail
+          cargo cyclonedx --format json --all --spec-version 1.5
+          mkdir -p sbom
+          find . -name '*.cdx.json' -not -path './target/*' -exec mv {} sbom/ \;
+          ls -la sbom/
+
+      - name: Upload the artefacts
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: adocpdf-release-artefacts
+          if-no-files-found: error
+          path: |
+            target/release/adocpdf
+            sbom/*.cdx.json

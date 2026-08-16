@@ -129,6 +129,35 @@ rustup toolchain install 1.92 --profile minimal
 
 A job whose tool is missing **fails**; it never skips.
 
+### The one check that is not in the gate
+
+Commit messages. `committed` enforces Conventional Commits, and it runs in CI
+on pull requests — `.github/workflows/commits.yml` — not in
+`scripts/ci/gate.sh`.
+
+The reason is not oversight. The gate checks the **working tree**: it can run
+on uncommitted changes, and all seventeen of its jobs make sense before a
+commit exists. A commit-message linter checks **history**, which the gate has
+no view of. Putting it there would add a job that is meaningless in the
+situation the gate is normally run in. A local hook was rejected too —
+`--no-verify` exists, so a check the author can skip is documentation.
+
+Before opening a pull request:
+
+```bash
+committed HEAD~..HEAD^2 --no-merge-commit   # what CI runs, on a PR
+committed <base>..HEAD                      # equivalent, on a local branch
+```
+
+`cargo install committed --locked` — `taiki-e/install-action` does not carry
+it. Its rules live in `committed.toml`, and each departure from the tool's
+defaults is recorded there with a reason.
+
+`CHANGELOG.md` is generated from that history by `git-cliff`, configured in
+`cliff.toml`. It is regenerated **when a release is cut**, not per commit: a
+changelog rewritten on every push conflicts on every merge. No CI job
+regenerates it, and it is not edited by hand.
+
 ### Where each rule is configured
 
 | Rule | File |
@@ -143,6 +172,8 @@ A job whose tool is missing **fails**; it never skips.
 | Tolerated advisories, with reasons | `.cargo/audit.toml` |
 | Coverage floor, MSRV | `MIN_LINE_COVERAGE`, `MSRV` in `scripts/ci/gate.sh` |
 | Editor defaults, mirroring the formatters | `.editorconfig` |
+| Commit-message rules, and every departure from the tool's defaults | `committed.toml` |
+| Changelog grouping and templates | `cliff.toml` |
 | What CI runs, and the SHA every action is pinned to | `.github/workflows/ci.yml` |
 | Dependency update schedule | `.github/dependabot.yml` |
 

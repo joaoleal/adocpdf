@@ -12,6 +12,17 @@
 /target/llvm-cov-target
 /target/nextest
 
+# Generated SBOMs. `cargo cyclonedx` writes one file per workspace member,
+# beside that member's Cargo.toml — it has no --output flag, so these land in
+# the source tree whether or not that is wanted. They are release artefacts,
+# built in CI and attached to the release: a committed SBOM changes on every
+# dependency bump, conflicts on every Dependabot merge, and is wrong the moment
+# nobody regenerates it.
+*.cdx.json
+*.cdx.xml
+/bom.json
+/bom.xml
+
 # Profiling and debugging output.
 perf.data
 perf.data.old

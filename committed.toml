@@ -1,0 +1,55 @@
+# Conventional Commits enforcement.
+#
+# AGENTS.md and openspec/config.yaml both mandate Conventional Commits, and
+# until now nothing checked it. This is the one check that is NOT in
+# scripts/ci/gate.sh: the gate checks the working tree and can run before a
+# commit exists, while this checks history. See CONTRIBUTING.md.
+#
+# Every value below that departs from committed's defaults is a deliberate
+# choice, recorded here with its reason, per AGENTS.md's "Exceptions need
+# reasons".
+
+style = "conventional"
+
+# committed's default list omits `build`, `ci` and `revert`. All three are
+# standard Conventional Commits types, and this repository already uses two of
+# them — the CI workflow landed as `ci:` and the gate as `build:`. Setting this
+# key REPLACES the default list rather than extending it, so the defaults are
+# repeated here in full.
+allowed_types = [
+    "build",
+    "chore",
+    "ci",
+    "docs",
+    "feat",
+    "fix",
+    "perf",
+    "refactor",
+    "revert",
+    "style",
+    "test",
+]
+
+# Conventional Commits specifies a format, not a capitalisation. committed
+# defaults to requiring a capitalised subject, which reads oddly after a
+# lowercase type — `feat: Render` — and contradicts this project's existing
+# history and AGENTS.md's own `feat(domain): ...` example. Lowercase it is.
+subject_capitalized = false
+
+# committed defaults to 50, the classic git guidance for a bare summary. A
+# conventional subject spends part of that budget on `type(scope): ` before the
+# description starts, so 50 total is tighter than it looks. 72 is git's hard
+# wrap and the width GitHub renders before truncating.
+#
+# This is not a relaxation to admit existing commits: the spec sets no length,
+# so 50 was never a rule this project had adopted.
+subject_length = 72
+
+# Merges carry a generated subject that no convention covers, so they are
+# excluded rather than exempted case by case.
+merge_commit = false
+
+# Dependabot writes its own subjects. `.github/dependabot.yml` already
+# configures `prefix: build`, so its commits are conventional by construction,
+# but the author filter costs nothing and covers a renamed bot.
+ignore_author_re = "(dependabot|renovate)"
