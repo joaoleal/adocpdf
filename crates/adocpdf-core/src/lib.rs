@@ -17,6 +17,7 @@
 pub mod document;
 pub mod geometry;
 pub mod length;
+pub mod presentation;
 pub mod theme;
 pub mod typography;
 
@@ -27,6 +28,10 @@ pub use document::{
 };
 pub use geometry::{InvalidPageGeometry, Margins, PageGeometry};
 pub use length::{InvalidLength, Length};
+pub use presentation::{
+    Alignment, InvalidListStart, LEAD_ROLE, ListForm, ListMarker, ListPresentation, ListStart,
+    ParagraphPresentation,
+};
 pub use theme::{
     DEFAULT_FONT_FAMILY, InvalidThemeId, Theme, ThemeId, ThemeSet, ThemeTransition,
     built_in_default_theme,

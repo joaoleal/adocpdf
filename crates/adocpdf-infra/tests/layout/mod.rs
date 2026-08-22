@@ -24,6 +24,7 @@ use adocpdf_infra::parser::AsciidocParser;
 use adocpdf_infra::themes::BuiltInThemes;
 use adocpdf_infra::world::InMemoryWorld;
 use typst::layout::{Frame, FrameItem, Point};
+use typst::visualize::Geometry;
 use typst_layout::PagedDocument;
 
 /// A run of text as the engine placed it.
@@ -42,8 +43,57 @@ pub struct Run {
     pub y: f64,
     /// The family the glyphs were taken from, as the face reports it.
     pub family: String,
+    /// The weight of the face the glyphs were taken from.
+    ///
+    /// A bold run and an upright one report the same family — the family is
+    /// `DejaVu Sans` either way — so the family alone cannot tell them apart.
+    pub weight: u16,
     /// The size the run was set at, in points.
     pub size: f64,
+    /// How far the run advances, in points.
+    ///
+    /// Measured by the engine from the glyphs it placed, so a test asking where
+    /// a line ends is asking the page rather than estimating from a character
+    /// count.
+    pub width: f64,
+}
+
+impl Run {
+    /// Where the run ends, in points from the page's left edge.
+    #[must_use]
+    pub fn right(&self) -> f64 {
+        self.x + self.width
+    }
+}
+
+/// A straight rule the engine drew.
+///
+/// An underline, a strikethrough and a thematic break are all this: a stroked
+/// horizontal line at a position. They are the only evidence that a decoration
+/// reached the page — a decorated run is an ordinary text run, and asking the
+/// text alone whether it was underlined cannot answer.
+#[derive(Debug, Clone)]
+pub struct Rule {
+    /// Distance from the page's left edge to where the rule starts, in points.
+    pub x: f64,
+    /// Distance from the page's top edge, in points.
+    pub y: f64,
+    /// How far the rule runs, in points.
+    pub width: f64,
+}
+
+impl Rule {
+    /// Whether the rule runs under, over or through the horizontal span of
+    /// `run`.
+    #[must_use]
+    pub fn spans(&self, run: &Run) -> bool {
+        // Generous at both ends: a decoration is drawn to the edges of the
+        // glyphs it decorates, which is not exactly where the run's advance
+        // width says it starts and stops.
+        const SLACK: f64 = 1.0;
+
+        self.x <= run.x + SLACK && self.x + self.width >= run.x - SLACK
+    }
 }
 
 /// One laid-out page.
@@ -51,6 +101,8 @@ pub struct Run {
 pub struct Page {
     /// Every run on the page, in the order the engine emitted them.
     pub runs: Vec<Run>,
+    /// Every straight rule on the page.
+    pub rules: Vec<Rule>,
     /// The page's width in points.
     pub width: f64,
     /// The page's height in points.
@@ -110,9 +162,11 @@ pub fn render_with(source: &str, themes: &ThemeSet) -> Vec<Page> {
         .iter()
         .map(|page| {
             let mut runs = Vec::new();
-            collect(&page.frame, Point::zero(), &mut runs);
+            let mut rules = Vec::new();
+            collect(&page.frame, Point::zero(), &mut runs, &mut rules);
             Page {
                 runs,
+                rules,
                 width: page.frame.width().to_pt(),
                 height: page.frame.height().to_pt(),
             }
@@ -126,7 +180,7 @@ pub fn render_with(source: &str, themes: &ThemeSet) -> Vec<Page> {
 /// item's position is relative to the frame holding it, so a run inside three
 /// nested groups reports a position three groups deep. Adding them as the walk
 /// descends is what makes the numbers comparable between runs.
-fn collect(frame: &Frame, origin: Point, runs: &mut Vec<Run>) {
+fn collect(frame: &Frame, origin: Point, runs: &mut Vec<Run>, rules: &mut Vec<Rule>) {
     for (offset, item) in frame.items() {
         let at = origin + *offset;
         match item {
@@ -135,9 +189,22 @@ fn collect(frame: &Frame, origin: Point, runs: &mut Vec<Run>) {
                 x: at.x.to_pt(),
                 y: at.y.to_pt(),
                 family: text.font.info().family.clone(),
+                weight: text.font.info().variant.weight.to_number(),
                 size: text.size.to_pt(),
+                width: text.width().to_pt(),
             }),
-            FrameItem::Group(group) => collect(&group.frame, at, runs),
+            FrameItem::Shape(shape, _) => {
+                if let Geometry::Line(end) = shape.geometry
+                    && shape.stroke.is_some()
+                {
+                    rules.push(Rule {
+                        x: at.x.to_pt(),
+                        y: at.y.to_pt(),
+                        width: end.x.to_pt(),
+                    });
+                }
+            }
+            FrameItem::Group(group) => collect(&group.frame, at, runs, rules),
             _ => {}
         }
     }
@@ -152,6 +219,8 @@ pub struct Line {
     pub y: f64,
     /// The left edge of the leftmost run on the line, in points.
     pub left: f64,
+    /// The right edge of the rightmost run on the line, in points.
+    pub right: f64,
     /// The size of the largest run on the line, in points.
     pub size: f64,
 }
@@ -196,6 +265,7 @@ impl Page {
                 text: line.iter().map(|run| run.text.as_str()).collect(),
                 y: baseline(&line),
                 left: line.iter().map(|run| run.x).fold(f64::INFINITY, f64::min),
+                right: line.iter().map(|run| run.right()).fold(0.0, f64::max),
                 size: line.iter().map(|run| run.size).fold(0.0, f64::max),
             })
             .collect()
@@ -217,6 +287,11 @@ impl Page {
     /// The text of every line, in reading order.
     pub fn line_texts(&self) -> Vec<String> {
         self.lines().into_iter().map(|line| line.text).collect()
+    }
+
+    /// Every rule drawn across the horizontal span of `run`.
+    pub fn rules_over(&self, run: &Run) -> Vec<&Rule> {
+        self.rules.iter().filter(|rule| rule.spans(run)).collect()
     }
 }
 

@@ -44,6 +44,7 @@ fn text_of(block: &Block) -> String {
             .collect(),
         Block::Titled { block, .. } => text_of(block),
         Block::Section(section) => section.body().iter().map(text_of).collect(),
+        Block::Heading { text, .. } => text.plain_text(),
         Block::Break(_) => String::new(),
     }
 }

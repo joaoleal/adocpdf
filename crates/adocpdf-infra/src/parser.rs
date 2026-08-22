@@ -23,6 +23,9 @@ use adocpdf_core::document::{
     InlineText, List, ListItem, ListKind, Paragraph, Quotation, QuotationKind, Section, Verbatim,
     VerbatimKind,
 };
+use adocpdf_core::presentation::{
+    Alignment, LEAD_ROLE, ListForm, ListMarker, ListPresentation, ListStart, ParagraphPresentation,
+};
 use adocpdf_core::theme::ThemeId;
 use adocpdf_domain::error::{DomainError, SourceLocation};
 use adocpdf_domain::ports::{Date, DocumentParser, ParseOutcome, SkippedConstruct};
@@ -40,6 +43,16 @@ use crate::inline::{
     DecodedInline, TypesetRenderer, decode, decode_keeping_line_breaks, decode_preserving_text,
     is_parser_sentinel, is_reserved_marker,
 };
+
+/// The attribute an ordered list uses to declare the number it counts from.
+///
+/// For example:
+///
+/// ```asciidoc
+/// [start=4]
+/// . the fourth thing
+/// ```
+pub const START_ATTRIBUTE: &str = "start";
 
 /// The block attribute a section uses to declare its theme.
 ///
@@ -449,6 +462,24 @@ impl Mapper {
         match block {
             SourceBlock::Simple(simple) => self.simple(simple, block),
 
+            // A discrete heading arrives as a section that holds nothing: the
+            // parser gives it its own context and leaves the blocks after it
+            // where they were. Mapping it to a section all the same would put
+            // a container around nothing and give the engine an outline entry
+            // for a heading that asked to stay out of the structure.
+            SourceBlock::Section(source_section)
+                if source_section.resolved_context().as_ref() == FLOATING_TITLE_CONTEXT =>
+            {
+                let text = self.inline(
+                    source_section.section_title(),
+                    location_of(source_section.span()),
+                );
+                vec![Block::Heading {
+                    text,
+                    level: clamp_level(source_section.level()),
+                }]
+            }
+
             SourceBlock::Section(source_section) => self.section(source_section),
 
             SourceBlock::RawDelimited(raw) => {
@@ -521,10 +552,35 @@ impl Mapper {
         let rendered = simple.content().rendered().trim_end();
         let text = self.inline(rendered, location_of(simple.span()));
         if text.is_empty() {
-            Vec::new()
-        } else {
-            self.titled(block, Block::Paragraph(Paragraph::new(text)))
+            return Vec::new();
         }
+
+        let presentation = self.paragraph_presentation(block);
+        self.titled(
+            block,
+            Block::Paragraph(Paragraph::new(text).with_presentation(presentation)),
+        )
+    }
+
+    /// Reads a paragraph's attribute list for how it asked to be set.
+    ///
+    /// A role this renderer has no meaning for is reported and its paragraph
+    /// still rendered, which is the same promise the inline path makes: the
+    /// omission is never silent and no content is lost to it.
+    fn paragraph_presentation(&mut self, block: &SourceBlock<'_>) -> ParagraphPresentation {
+        let mut presentation = ParagraphPresentation::body();
+
+        for role in block.roles() {
+            if role == LEAD_ROLE {
+                presentation = presentation.as_lead();
+            } else if let Some(alignment) = Alignment::from_role(role) {
+                presentation = presentation.with_alignment(alignment);
+            } else {
+                self.skip(format!("role {role:?}"), block.span());
+            }
+        }
+
+        presentation
     }
 
     /// Maps a section and everything nested inside it.
@@ -718,10 +774,64 @@ impl Mapper {
             {
                 item = item.with_term(self.inline(term.rendered(), location_of(source)));
             }
+            // The parser has already taken the `[x]` out of the item's text, so
+            // nothing has to strip it here — and nothing can put it back.
+            if let Some(checked) = source_item.checkbox() {
+                item = item.with_checkbox(checked);
+            }
             items.push(item);
         }
 
-        self.titled(block, Block::List(List::new(kind, items)))
+        let presentation = self.list_presentation(block, list.is_checklist());
+
+        self.titled(
+            block,
+            Block::List(List::new(kind, items).with_presentation(presentation)),
+        )
+    }
+
+    /// Reads a list's attribute list for how it asked to be set.
+    ///
+    /// An attribute this renderer does not honour is reported by name, and the
+    /// list still renders with its default presentation: a presentation choice
+    /// must never cost an author their content.
+    fn list_presentation(
+        &mut self,
+        block: &SourceBlock<'_>,
+        is_checklist: bool,
+    ) -> ListPresentation {
+        let mut presentation = ListPresentation::stacked();
+
+        // Read from the items rather than declared, so it comes first and a
+        // declared style can still have its say.
+        if is_checklist {
+            presentation = presentation.with_form(ListForm::Checklist);
+        }
+
+        if let Some(attrlist) = block.attrlist() {
+            if let Some(style) = attrlist.block_style() {
+                if let Some(marker) = ListMarker::from_style(style) {
+                    presentation = presentation.with_marker(marker);
+                } else if let Some(form) = ListForm::from_style(style) {
+                    presentation = presentation.with_form(form);
+                } else {
+                    self.skip(format!("list style {style:?}"), block.span());
+                }
+            }
+
+            if let Some(start) = attrlist.named_attribute(START_ATTRIBUTE) {
+                match ListStart::parse(start.value()) {
+                    Ok(declared) => presentation = presentation.with_start(declared),
+                    Err(error) => self.skip(error.to_string(), block.span()),
+                }
+            }
+        }
+
+        for role in block.roles() {
+            self.skip(format!("role {role:?}"), block.span());
+        }
+
+        presentation
     }
 
     /// Maps a block's children.
@@ -782,6 +892,9 @@ impl Mapper {
         });
     }
 }
+
+/// The context the parser gives a heading that opens no section.
+const FLOATING_TITLE_CONTEXT: &str = "floating_title";
 
 /// Names a block the way an author would recognise it.
 fn describe(block: &SourceBlock<'_>) -> String {

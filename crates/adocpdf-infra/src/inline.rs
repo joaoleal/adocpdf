@@ -48,6 +48,10 @@ const MONOSPACE_OPEN: char = '\u{fdd2}';
 const SUPERSCRIPT_OPEN: char = '\u{fdd3}';
 const SUBSCRIPT_OPEN: char = '\u{fdd4}';
 const HIGHLIGHT_OPEN: char = '\u{fdd5}';
+const UNDERLINE_OPEN: char = '\u{fdd6}';
+const STRIKETHROUGH_OPEN: char = '\u{fdd7}';
+const LARGER_OPEN: char = '\u{fddc}';
+const SMALLER_OPEN: char = '\u{fddd}';
 
 /// Closes the innermost open span.
 const SPAN_CLOSE: char = '\u{fdd8}';
@@ -80,6 +84,10 @@ const fn open_marker(style: InlineStyle) -> char {
         InlineStyle::Superscript => SUPERSCRIPT_OPEN,
         InlineStyle::Subscript => SUBSCRIPT_OPEN,
         InlineStyle::Highlight => HIGHLIGHT_OPEN,
+        InlineStyle::Underline => UNDERLINE_OPEN,
+        InlineStyle::Strikethrough => STRIKETHROUGH_OPEN,
+        InlineStyle::Larger => LARGER_OPEN,
+        InlineStyle::Smaller => SMALLER_OPEN,
     }
 }
 
@@ -128,6 +136,10 @@ pub const fn is_emitted_marker(character: char) -> bool {
             | SUPERSCRIPT_OPEN
             | SUBSCRIPT_OPEN
             | HIGHLIGHT_OPEN
+            | UNDERLINE_OPEN
+            | STRIKETHROUGH_OPEN
+            | LARGER_OPEN
+            | SMALLER_OPEN
             | SPAN_CLOSE
             | HARD_LINE_BREAK
             | UNSUPPORTED_OPEN
@@ -162,42 +174,34 @@ impl InlineSubstitutionRenderer for TypesetRenderer {
         &self,
         type_: QuoteType,
         _scope: QuoteScope,
-        _attrlist: Option<Attrlist<'_>>,
+        attrlist: Option<Attrlist<'_>>,
         _id: Option<String>,
         body: &str,
         dest: &mut String,
     ) {
-        // `body` has already been rendered by this same renderer, so nesting
-        // composes without any work here.
-        match type_ {
-            QuoteType::Strong => wrap(InlineStyle::Strong, body, dest),
-            QuoteType::Emphasis => wrap(InlineStyle::Emphasis, body, dest),
-            QuoteType::Monospaced => wrap(InlineStyle::Monospace, body, dest),
-            QuoteType::Superscript => wrap(InlineStyle::Superscript, body, dest),
-            QuoteType::Subscript => wrap(InlineStyle::Subscript, body, dest),
-            QuoteType::Mark => wrap(InlineStyle::Highlight, body, dest),
+        // The quote's own presentation first, then the roles around it, so
+        // that `[.underline]*bold*` reaches the page as both. Written into a
+        // buffer rather than straight into `dest` because each role wraps
+        // everything decided so far.
+        let mut quoted = String::new();
+        quote(type_, body, &mut quoted);
 
-            // Curved quotation marks are typography, not a presentation, so
-            // they are characters rather than a span.
-            QuoteType::DoubleQuote => {
-                dest.push('\u{201c}');
-                dest.push_str(body);
-                dest.push('\u{201d}');
+        // An id is deliberately dropped. It is only useful once something can
+        // link to it, and nothing can yet; carrying it would be weight in the
+        // model with no reader.
+        for role in attrlist.as_ref().map(Attrlist::roles).unwrap_or_default() {
+            let mut wrapped = String::new();
+            match InlineStyle::from_role(role) {
+                Some(style) => wrap(style, &quoted, &mut wrapped),
+                // A role with no typographic meaning here is reported by name
+                // and its text kept. A role is a stylesheet class by origin,
+                // and this renderer has no stylesheet to consult.
+                None => unsupported(&format!("role {role:?}"), &quoted, &mut wrapped),
             }
-            QuoteType::SingleQuote => {
-                dest.push('\u{2018}');
-                dest.push_str(body);
-                dest.push('\u{2019}');
-            }
-
-            // A span with no presentation of its own, and mathematical
-            // notation, which is tier 5. Both keep their text and add no
-            // structure: for the first that is the whole meaning, and for the
-            // second it is what stops the notation being lost.
-            QuoteType::Unquoted | QuoteType::AsciiMath | QuoteType::LatexMath => {
-                dest.push_str(body);
-            }
+            quoted = wrapped;
         }
+
+        dest.push_str(&quoted);
     }
 
     fn render_character_replacement(&self, type_: CharacterReplacementType, dest: &mut String) {
@@ -326,11 +330,54 @@ impl InlineSubstitutionRenderer for TypesetRenderer {
     }
 }
 
+/// Writes `body` under the presentation the quote syntax asked for.
+///
+/// Separate from the roles that may wrap it: the quote syntax and the
+/// attribute list are two independent asks, and `[.underline]*bold*` is
+/// both.
+fn quote(type_: QuoteType, body: &str, dest: &mut String) {
+    // `body` has already been rendered by this same renderer, so nesting
+    // composes without any work here.
+    match type_ {
+        QuoteType::Strong => wrap(InlineStyle::Strong, body, dest),
+        QuoteType::Emphasis => wrap(InlineStyle::Emphasis, body, dest),
+        QuoteType::Monospaced => wrap(InlineStyle::Monospace, body, dest),
+        QuoteType::Superscript => wrap(InlineStyle::Superscript, body, dest),
+        QuoteType::Subscript => wrap(InlineStyle::Subscript, body, dest),
+        QuoteType::Mark => wrap(InlineStyle::Highlight, body, dest),
+
+        // Curved quotation marks are typography, not a presentation, so
+        // they are characters rather than a span.
+        QuoteType::DoubleQuote => {
+            dest.push('\u{201c}');
+            dest.push_str(body);
+            dest.push('\u{201d}');
+        }
+        QuoteType::SingleQuote => {
+            dest.push('\u{2018}');
+            dest.push_str(body);
+            dest.push('\u{2019}');
+        }
+
+        // A span with no presentation of its own, and mathematical
+        // notation, which is tier 5. Both keep their text and add no
+        // structure: for the first that is the whole meaning, and for the
+        // second it is what stops the notation being lost.
+        QuoteType::Unquoted | QuoteType::AsciiMath | QuoteType::LatexMath => {
+            dest.push_str(body);
+        }
+    }
+}
+
 /// Writes an unsupported construct: its name, and the text it carried.
 ///
-/// The name comes from this crate's own closed vocabulary, never from the
-/// document, so it cannot contain a marker. The text is arbitrary content and
-/// is written as-is; the decoder treats it as text and nothing else.
+/// The name is usually from this crate's own closed vocabulary. A role is the
+/// exception — an author names it — and that is safe for the same reason the
+/// markers themselves are: a role name comes from the source, and
+/// `parser::refuse_input_that_could_forge_structure` has already refused every
+/// character in the reserved range, so a name cannot hold a marker or the
+/// separator that ends it. The text is arbitrary content and is written as-is;
+/// the decoder treats it as text and nothing else.
 fn unsupported(construct: &str, text: &str, dest: &mut String) {
     dest.push(UNSUPPORTED_OPEN);
     dest.push_str(construct);
@@ -427,6 +474,10 @@ const fn style_of(marker: char) -> Option<InlineStyle> {
         SUPERSCRIPT_OPEN => Some(InlineStyle::Superscript),
         SUBSCRIPT_OPEN => Some(InlineStyle::Subscript),
         HIGHLIGHT_OPEN => Some(InlineStyle::Highlight),
+        UNDERLINE_OPEN => Some(InlineStyle::Underline),
+        STRIKETHROUGH_OPEN => Some(InlineStyle::Strikethrough),
+        LARGER_OPEN => Some(InlineStyle::Larger),
+        SMALLER_OPEN => Some(InlineStyle::Smaller),
         _ => None,
     }
 }
@@ -809,6 +860,70 @@ mod tests {
                 other => other.to_string(),
             })
             .collect()
+    }
+
+    #[test]
+    fn a_role_with_typographic_meaning_becomes_the_style_it_names() {
+        for (source, expected) in [
+            ("[.underline]#x#", InlineStyle::Underline),
+            ("[.line-through]#x#", InlineStyle::Strikethrough),
+            ("[.big]#x#", InlineStyle::Larger),
+            ("[.small]#x#", InlineStyle::Smaller),
+        ] {
+            let decoded = decode(&encode_document(source));
+
+            assert_eq!(
+                decoded.text.nodes(),
+                [InlineNode::styled(expected, vec![InlineNode::text("x")])],
+                "for {source}"
+            );
+            assert!(decoded.unsupported.is_empty(), "for {source}");
+        }
+    }
+
+    #[test]
+    fn a_role_wraps_the_presentation_the_quote_syntax_asked_for() {
+        let decoded = decode(&encode_document("[.underline]*bold*"));
+
+        assert_eq!(
+            decoded.text.nodes(),
+            [InlineNode::styled(
+                InlineStyle::Underline,
+                vec![InlineNode::styled(
+                    InlineStyle::Strong,
+                    vec![InlineNode::text("bold")]
+                )]
+            )],
+            "a role and the quote syntax are two independent asks"
+        );
+    }
+
+    #[test]
+    fn several_roles_on_one_span_all_apply() {
+        let decoded = decode(&encode_document("[.underline.small]#x#"));
+
+        assert_eq!(decoded.text.plain_text(), "x");
+
+        let mut styles = Vec::new();
+        let mut nodes = decoded.text.nodes().to_vec();
+        while let [InlineNode::Styled { style, children }] = nodes.as_slice() {
+            styles.push(*style);
+            nodes = children.clone();
+        }
+
+        assert_eq!(styles, [InlineStyle::Smaller, InlineStyle::Underline]);
+    }
+
+    #[test]
+    fn a_role_with_no_typographic_meaning_is_named_and_its_text_kept() {
+        let decoded = decode(&encode_document("[.warning]#danger#"));
+
+        assert_eq!(
+            decoded.text.nodes(),
+            [InlineNode::text("danger")],
+            "the text is set no differently from the body text around it"
+        );
+        assert_eq!(decoded.unsupported, [r#"role "warning""#]);
     }
 
     #[test]

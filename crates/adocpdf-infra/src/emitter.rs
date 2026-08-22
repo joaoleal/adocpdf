@@ -21,6 +21,7 @@ use adocpdf_core::document::{
     ListKind, QuotationKind, Verbatim,
 };
 use adocpdf_core::geometry::PageGeometry;
+use adocpdf_core::presentation::{Alignment, ListForm, ListPresentation, ParagraphPresentation};
 use adocpdf_core::theme::{Theme, ThemeTransition};
 use adocpdf_core::typography::Typography;
 use adocpdf_domain::document_plan::{GroupKind, LayoutPlan, PlanItem};
@@ -29,6 +30,23 @@ use crate::markup::string_literal;
 
 /// How much larger than body text the document title is set.
 const TITLE_SCALE: f64 = 1.8;
+
+/// How much larger than body text a lead paragraph is set.
+///
+/// Size rather than weight: a lead paragraph is several lines long, and a whole
+/// passage in a heavier face reads as emphasis rather than as an opening.
+const LEAD_SCALE: f64 = 1.15;
+
+/// The relative sizes the `big` and `small` roles ask for.
+///
+/// Relative to whatever encloses them, so that a small span inside a lead
+/// paragraph is small relative to the lead and not to body text.
+const LARGER_SCALE: &str = "1.2em";
+const SMALLER_SCALE: &str = "0.85em";
+
+/// The markers a checklist item carries, showing its state.
+const CHECKED: char = '\u{2611}';
+const UNCHECKED: char = '\u{2610}';
 
 /// Renders a plan as engine source.
 #[must_use]
@@ -92,9 +110,21 @@ impl Emitter {
                     self.inline(text)
                 );
             }
-            PlanItem::Paragraph(text) => {
-                let _ = writeln!(self.out, "#par({})", self.inline(text));
+            PlanItem::DiscreteHeading { text, level } => {
+                // Set as a heading and nothing else. `outlined` and
+                // `bookmarked` are turned off because a discrete heading takes
+                // no part in the document's structure, and an outline entry is
+                // exactly the structure it is asking to stay out of.
+                let _ = writeln!(
+                    self.out,
+                    "#heading(level: {}, outlined: false, bookmarked: false, \
+                     text(size: {}, {}))",
+                    level.get(),
+                    points(self.heading_size_points(level.get())),
+                    self.inline(text)
+                );
             }
+            PlanItem::Paragraph { text, presentation } => self.paragraph(text, *presentation),
             PlanItem::Verbatim(verbatim) => self.verbatim(verbatim),
             PlanItem::Break(kind) => self.block_break(*kind),
             PlanItem::BlockTitle(text) => {
@@ -112,6 +142,37 @@ impl Emitter {
             PlanItem::Group { kind, children } => self.group(kind, children),
             PlanItem::ThemeChange { theme, transition } => self.theme_change(theme, *transition),
         }
+    }
+
+    /// Emits a paragraph, honouring whatever its attribute list asked for.
+    ///
+    /// Alignment is set on the paragraph rather than by changing the theme, so
+    /// it cannot reach the paragraphs around it. A declared alignment also
+    /// names its own justification: an author asking for centred text is asking
+    /// for it whatever the theme does, and leaving justification to the theme
+    /// would centre lines that are also stretched to the measure.
+    fn paragraph(&mut self, text: &InlineText, presentation: ParagraphPresentation) {
+        let mut content = self.inline(text);
+        if presentation.is_lead() {
+            content = format!(
+                "text(size: {}, {content})",
+                points(self.body_size_points * LEAD_SCALE)
+            );
+        }
+
+        let Some(alignment) = presentation.alignment() else {
+            let _ = writeln!(self.out, "#par({content})");
+            return;
+        };
+
+        let _ = match alignment {
+            Alignment::Justify => writeln!(self.out, "#par(justify: true, {content})"),
+            Alignment::Left => writeln!(self.out, "#align(left, par(justify: false, {content}))"),
+            Alignment::Center => {
+                writeln!(self.out, "#align(center, par(justify: false, {content}))")
+            }
+            Alignment::Right => writeln!(self.out, "#align(right, par(justify: false, {content}))"),
+        };
     }
 
     /// The size a heading of `level` is set at.
@@ -174,7 +235,7 @@ impl Emitter {
                 citation,
             } => self.quotation(*kind, attribution.as_ref(), citation.as_ref(), children),
             GroupKind::Container(container) => self.container(*container, children),
-            GroupKind::List(list) => self.list(*list, children),
+            GroupKind::List { kind, presentation } => self.list(*kind, *presentation, children),
             // Reached only through `list`, which knows which list the item is
             // in and so which element it becomes.
             GroupKind::ListItem { .. } => self.children(children),
@@ -271,24 +332,161 @@ impl Emitter {
     /// read back by the engine as its own enumeration syntax — emitter output
     /// being reinterpreted as markup, which is exactly what this file's
     /// string-literal discipline exists to prevent everywhere else.
-    fn list(&mut self, list: ListKind, items: &[PlanItem]) {
+    fn list(&mut self, list: ListKind, presentation: ListPresentation, items: &[PlanItem]) {
+        match presentation.form() {
+            ListForm::Horizontal => return self.horizontal_list(items),
+            ListForm::Checklist => return self.checklist(items),
+            ListForm::QuestionsAndAnswers => return self.questions_and_answers(items),
+            ListForm::Stacked => {}
+        }
+
         let element = match list {
             ListKind::Unordered => "list",
             ListKind::Ordered => "enum",
             ListKind::Description => "terms",
         };
 
-        let _ = writeln!(self.out, "#{element}(");
+        // The marker is content, and it comes from a closed set of three
+        // shapes, so it is a literal in a structural position rather than
+        // anything derived from the document. An ordered list needs no `start`
+        // here: every item already carries the number the planner counted for
+        // it, from whatever start the source declared.
+        let marker = match (list, presentation.marker()) {
+            (ListKind::Unordered, Some(shape)) => {
+                format!("marker: {}, ", string_literal(&shape.glyph().to_string()))
+            }
+            _ => String::new(),
+        };
+
+        let _ = writeln!(self.out, "#{element}({marker}");
         for item in items {
             self.list_item(list, item);
         }
         let _ = writeln!(self.out, ")");
     }
 
+    /// Emits a description list with its terms in a column of their own.
+    ///
+    /// A grid rather than the engine's `terms` element, because what
+    /// `[horizontal]` asks for is exactly a grid: the terms align with one
+    /// another, which run-in terms by definition do not, and a description
+    /// wrapping onto a second line stays in its own column instead of running
+    /// back under the term.
+    fn horizontal_list(&mut self, items: &[PlanItem]) {
+        // Indented by a pad around the grid rather than by an inset on it: an
+        // inset applies to every cell, so it would indent the description
+        // column away from its term as well as the term from the margin.
+        let _ = writeln!(
+            self.out,
+            "#pad(left: {}, grid(columns: (auto, 1fr), column-gutter: {}, row-gutter: {},",
+            points(self.body_size_points * 0.5),
+            points(self.body_size_points),
+            points(self.body_size_points * 0.55),
+        );
+
+        for item in items {
+            let Some((term, children, _)) = Self::item_parts(item) else {
+                self.item(item);
+                continue;
+            };
+
+            let _ = writeln!(
+                self.out,
+                "strong({}),",
+                term.map_or_else(|| string_literal(""), |text| self.inline(text))
+            );
+            self.item_body(children);
+            let _ = writeln!(self.out, ",");
+        }
+
+        let _ = writeln!(self.out, "))");
+    }
+
+    /// Emits a description list as numbered questions, each answered beneath.
+    fn questions_and_answers(&mut self, items: &[PlanItem]) {
+        let _ = writeln!(self.out, "#enum(");
+
+        for item in items {
+            let Some((term, children, _)) = Self::item_parts(item) else {
+                self.item(item);
+                continue;
+            };
+            let PlanItem::Group {
+                kind: GroupKind::ListItem { position, .. },
+                ..
+            } = item
+            else {
+                continue;
+            };
+
+            let _ = writeln!(
+                self.out,
+                "enum.item({position}, [#(emph({}))",
+                term.map_or_else(|| string_literal(""), |text| self.inline(text))
+            );
+            let _ = writeln!(self.out, "#parbreak()");
+            for child in children {
+                self.item(child);
+            }
+            let _ = writeln!(self.out, "]),");
+        }
+
+        let _ = writeln!(self.out, ")");
+    }
+
+    /// Emits a list whose markers show which items are done.
+    ///
+    /// A grid, for the reason a horizontal list is one: the state belongs to
+    /// the item, and the engine's list element takes one marker for the whole
+    /// list. Writing the state into the item's text instead would put it in
+    /// the text column, where a wrapped line would align under the box rather
+    /// than under the words.
+    fn checklist(&mut self, items: &[PlanItem]) {
+        let _ = writeln!(
+            self.out,
+            "#pad(left: {}, grid(columns: (auto, 1fr), column-gutter: {}, row-gutter: {},",
+            points(self.body_size_points),
+            points(self.body_size_points * 0.35),
+            points(self.body_size_points),
+        );
+
+        for item in items {
+            let Some((_, children, checkbox)) = Self::item_parts(item) else {
+                self.item(item);
+                continue;
+            };
+
+            // An item in a checklist that carries no box of its own keeps the
+            // list's marker, so that a list mixing the two still reads as one
+            // list rather than as items that lost something.
+            let marker = match checkbox {
+                Some(true) => CHECKED,
+                Some(false) => UNCHECKED,
+                None => '\u{2022}',
+            };
+            let _ = writeln!(self.out, "{},", string_literal(&marker.to_string()));
+            self.item_body(children);
+            let _ = writeln!(self.out, ",");
+        }
+
+        let _ = writeln!(self.out, "))");
+    }
+
+    /// The term, content and state of a planned list item.
+    fn item_parts(item: &PlanItem) -> Option<(Option<&InlineText>, &[PlanItem], Option<bool>)> {
+        match item {
+            PlanItem::Group {
+                kind: GroupKind::ListItem { term, checkbox, .. },
+                children,
+            } => Some((term.as_ref(), children, *checkbox)),
+            _ => None,
+        }
+    }
+
     /// Emits one item of a list of `list`'s kind.
     fn list_item(&mut self, list: ListKind, item: &PlanItem) {
         let PlanItem::Group {
-            kind: GroupKind::ListItem { term, position },
+            kind: GroupKind::ListItem { term, position, .. },
             children,
         } = item
         else {
@@ -328,7 +526,9 @@ impl Emitter {
     /// goes inside a content block, where block-level children are allowed and
     /// the first of them still starts beside the marker.
     fn item_body(&mut self, children: &[PlanItem]) {
-        if let [PlanItem::Paragraph(text)] = children {
+        if let [PlanItem::Paragraph { text, presentation }] = children
+            && presentation.is_body()
+        {
             let _ = write!(self.out, "{}", self.inline(text));
             return;
         }
@@ -338,7 +538,7 @@ impl Emitter {
             // The item's own first paragraph belongs beside the marker; a later
             // one is a continuation and is a paragraph in its own right.
             match (index, child) {
-                (0, PlanItem::Paragraph(text)) => {
+                (0, PlanItem::Paragraph { text, presentation }) if presentation.is_body() => {
                     // Parenthesised, and prefixed: this is markup mode, where a
                     // bare expression is literal text — the quotes of a string
                     // literal included, which the engine then curls into smart
@@ -435,6 +635,10 @@ impl Emitter {
                     InlineStyle::Superscript => format!("super({inner})"),
                     InlineStyle::Subscript => format!("sub({inner})"),
                     InlineStyle::Highlight => format!("highlight({inner})"),
+                    InlineStyle::Underline => format!("underline({inner})"),
+                    InlineStyle::Strikethrough => format!("strike({inner})"),
+                    InlineStyle::Larger => format!("text(size: {LARGER_SCALE}, {inner})"),
+                    InlineStyle::Smaller => format!("text(size: {SMALLER_SCALE}, {inner})"),
                 }
             }
         }
