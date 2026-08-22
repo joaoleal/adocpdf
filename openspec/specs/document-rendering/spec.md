@@ -76,6 +76,11 @@ level the renderer honours, not only at the first two. A reader who cannot tell
 one level from another cannot recover the document's structure from the page,
 which is the whole purpose of setting headings differently from body text.
 
+A heading the author marks as discrete SHALL be set as a heading but SHALL take
+no part in the section hierarchy: it SHALL NOT change the level of any heading
+after it, and it SHALL NOT introduce a section that could contain the blocks
+that follow.
+
 #### Scenario: Nested sections keep their level
 
 - **WHEN** the source contains a section and a subsection beneath it
@@ -87,6 +92,13 @@ which is the whole purpose of setting headings differently from body text.
 - **WHEN** a document contains headings at every level the renderer honours
 - **THEN** no two levels are set identically
 - **AND** each level is distinguishable from body text
+
+#### Scenario: A discrete heading is set but does not nest
+
+- **WHEN** a section contains a discrete heading followed by a paragraph
+- **THEN** the discrete heading is set as a heading
+- **AND** the paragraph after it still belongs to the enclosing section
+- **AND** a section heading following it keeps the level it would have had
 
 #### Scenario: An unsupported construct is skipped, not fatal
 
@@ -122,6 +134,7 @@ which is the whole purpose of setting headings differently from body text.
 - **THEN** the render succeeds and the construct is reported as skipped
 - **AND** the inventory records it as never to be supported, rather than as
   scheduled work
+
 ### Requirement: Rendering is deterministic
 
 Rendering the same source with the same configuration SHALL produce

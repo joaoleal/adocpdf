@@ -18,6 +18,20 @@ code delivers is worse than no document, so the promise is tested.
 | **Tier** | Which change honours it. Tier 1 is done. |
 | **Sample** | Minimal source proving the claim, with `\n` for a line break. Required for `honoured` and `partial`; `—` otherwise. |
 
+### Roles
+
+Four roles are honoured, because the language gives them a typographic meaning
+that does not depend on a stylesheet: `underline`, `line-through`, `big` and
+`small` on a span, and `text-left`, `text-center`, `text-right`, `text-justify`
+and `lead` on a paragraph.
+
+Every other role is reported by name, and the text it enclosed is still
+rendered. A role is a stylesheet class by origin — `[.warning]#x#` means
+whatever a stylesheet says it means — and this renderer has no stylesheet to
+consult. Inventing a presentation for it would put something on the page the
+author did not ask for. When a theme can name the roles it styles, this list
+stops being closed; that is the work tier 5 schedules.
+
 Skipping is never silent: an unsupported construct is reported by name and
 source location. An unsupported construct used *inline* keeps its text, so a
 sentence never loses a phrase. An unsupported *block* is reported and left out
@@ -47,8 +61,8 @@ column says when that is.
 | Attribute reference | `{name}` | yes | honoured | 1 | `:product: adocpdf\n\nBuilt with {product}.` |
 | Escape | `\*x*` | yes | honoured | 1 | `Not \*bold* here.` |
 | Inline passthrough | `+x+` `pass:[x]` | yes | partial (tier 3) | 1 | `Verbatim +*text*+ here.` |
-| Custom role span | `[.role]#x#` | yes | scheduled | 2 | — |
-| Underline, strikethrough | `[.underline]#x#` | yes | scheduled | 2 | — |
+| Custom role span | `[.role]#x#` | yes | scheduled | 5 | — |
+| Underline, strikethrough | `[.underline]#x#` | yes | honoured | 1 | `[.underline]#ruled# and [.line-through]#struck#.` |
 | Counters | `{counter:n}` | yes | scheduled | 5 | — |
 
 **Inline passthrough** is `partial`: content is set verbatim, which is what the
@@ -93,8 +107,8 @@ verse block, put a line ending on the page.
 | Markdown blockquote | `> quote` | yes | honoured | 1 | `> A quoted line.` |
 | Collapsible block | `[%collapsible]` | yes | scheduled | 4 | — |
 | Roles, IDs, options | `[#id.role]` | yes | scheduled | 2 | — |
-| Paragraph alignment | `[.text-left]` | yes | scheduled | 2 | — |
-| Lead paragraph | `[.lead]` | yes | scheduled | 2 | — |
+| Paragraph alignment | `[.text-left]` | yes | honoured | 1 | `[.text-center]\nCentred words` |
+| Lead paragraph | `[.lead]` | yes | honoured | 1 | `[.lead]\nThe opening.\n\nBody text.` |
 | Source highlighting | `:source-highlighter:` | yes | scheduled | 5 | — |
 | Callouts | `<1>` | yes | scheduled | 5 | — |
 
@@ -108,9 +122,9 @@ verse block, put a line ending on the page.
 | Nested ordered list | `.. item` | yes | honoured | 1 | `. first\n.. nested\n. second` |
 | Description list | `term:: text` | yes | honoured | 1 | `apple:: a fruit\npear:: another` |
 | List continuation | `+` | yes | honoured | 1 | `* one\n+\nStill the first item.\n\n* two` |
-| Custom marker, start | `[circle]` `[start=4]` | yes | scheduled | 2 | — |
-| Horizontal, Q&A lists | `[horizontal]` `[qanda]` | yes | scheduled | 2 | — |
-| Checklist | `* [x]` | yes | scheduled | 2 | — |
+| Custom marker, start | `[circle]` `[start=4]` | yes | honoured | 1 | `[circle]\n* one\n* two` |
+| Horizontal, Q&A lists | `[horizontal]` `[qanda]` | yes | honoured | 1 | `[horizontal]\nTerm:: A description\nOther:: Another` |
+| Checklist | `* [x]` | yes | honoured | 1 | `* [x] done\n* [ ] todo` |
 
 ## Sections and document structure
 
@@ -121,7 +135,7 @@ verse block, put a line ending on the page.
 | Section titles, levels 1–5 | `==` … `======` | yes | honoured | 1 | `== One\n\nBody.\n\n=== Two\n\nMore.` |
 | Attribute entry | `:name: value` | yes | honoured | 1 | `:name: value\n\nText.` |
 | Preamble | (implicit) | yes | honoured | 1 | `= Title\n\nPreamble text.\n\n== Section\n\nBody.` |
-| Discrete heading | `[discrete]` | yes | scheduled | 2 | — |
+| Discrete heading | `[discrete]` | yes | honoured | 1 | `[discrete]\n== An aside\n\nBody.` |
 | Auto and custom IDs | `[#id]` | yes | scheduled | 2 | — |
 | Section numbering | `:sectnums:` | yes | scheduled | 2 | — |
 | Parts and chapters | `:doctype: book` | yes | scheduled | 2 | — |

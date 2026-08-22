@@ -7,9 +7,10 @@
 //! inheritance, or precedence.
 
 use adocpdf_core::document::{
-    AdmonitionKind, Block, BreakKind, ContainerKind, Document, HeadingLevel, InlineText, ListKind,
-    QuotationKind, Section, Verbatim,
+    AdmonitionKind, Block, BreakKind, ContainerKind, Document, HeadingLevel, InlineText, List,
+    ListKind, QuotationKind, Section, Verbatim,
 };
+use adocpdf_core::presentation::{ListPresentation, ParagraphPresentation};
 use adocpdf_core::theme::{Theme, ThemeSet, ThemeTransition};
 
 use crate::error::DomainError;
@@ -26,8 +27,25 @@ pub enum PlanItem {
         /// How deeply it is nested.
         level: HeadingLevel,
     },
+    /// A heading that opens no section.
+    ///
+    /// Kept apart from [`PlanItem::Heading`] rather than flagged on it: the two
+    /// are set alike but mean different things, and a flag is something a
+    /// consumer can forget to read. A discrete heading must not reach the
+    /// document's outline, and the distinction is what says so.
+    DiscreteHeading {
+        /// The heading text.
+        text: InlineText,
+        /// How deeply it appears to be nested.
+        level: HeadingLevel,
+    },
     /// A paragraph of body text.
-    Paragraph(InlineText),
+    Paragraph {
+        /// The paragraph's text.
+        text: InlineText,
+        /// How the source asked for it to be set.
+        presentation: ParagraphPresentation,
+    },
     /// Content preserved exactly as written.
     Verbatim(Verbatim),
     /// A break in the flow of the document.
@@ -76,13 +94,24 @@ pub enum GroupKind {
     Container(ContainerKind),
     /// A list. Its children are its items, each of them an
     /// [`GroupKind::ListItem`] group.
-    List(ListKind),
+    List {
+        /// What kind of list it is.
+        kind: ListKind,
+        /// How the source asked for it to be set.
+        presentation: ListPresentation,
+    },
     /// One item of a list.
     ListItem {
         /// The term this item describes, for a description list.
         term: Option<InlineText>,
-        /// Which item this is, counting from one, for an ordered list.
+        /// The number this item carries, for an ordered list.
+        ///
+        /// Counted here rather than left to the layout engine, and counted
+        /// from whatever start the list declared: a number the renderer did
+        /// not choose is a number it cannot promise.
         position: usize,
+        /// Whether the item shows a state, and which.
+        checkbox: Option<bool>,
     },
 }
 
@@ -194,7 +223,16 @@ impl Planner {
     fn walk_block(&mut self, block: &Block, themes: &ThemeSet) -> Result<(), DomainError> {
         match block {
             Block::Paragraph(paragraph) => {
-                self.push(PlanItem::Paragraph(paragraph.text().clone()));
+                self.push(PlanItem::Paragraph {
+                    text: paragraph.text().clone(),
+                    presentation: paragraph.presentation(),
+                });
+            }
+            Block::Heading { text, level } => {
+                self.push(PlanItem::DiscreteHeading {
+                    text: text.clone(),
+                    level: *level,
+                });
             }
             Block::Section(section) => self.walk_section(section, themes)?,
             Block::Verbatim(verbatim) => self.push(PlanItem::Verbatim(verbatim.clone())),
@@ -228,24 +266,39 @@ impl Planner {
                     children,
                 });
             }
-            Block::List(list) => {
-                let mut items = Vec::new();
-                for (index, item) in list.items().iter().enumerate() {
-                    let children = self.group(item.body(), themes)?;
-                    items.push(PlanItem::Group {
-                        kind: GroupKind::ListItem {
-                            term: item.term().cloned(),
-                            position: index + 1,
-                        },
-                        children,
-                    });
-                }
-                self.push(PlanItem::Group {
-                    kind: GroupKind::List(list.kind()),
-                    children: items,
-                });
-            }
+            Block::List(list) => self.walk_list(list, themes)?,
         }
+        Ok(())
+    }
+
+    /// Plans a list and its items.
+    ///
+    /// Each item's number is counted here, from whatever start the list
+    /// declared, rather than left to the layout engine to infer from the text
+    /// it was handed.
+    fn walk_list(&mut self, list: &List, themes: &ThemeSet) -> Result<(), DomainError> {
+        let start = list.presentation().start();
+        let mut items = Vec::new();
+
+        for (index, item) in list.items().iter().enumerate() {
+            let children = self.group(item.body(), themes)?;
+            items.push(PlanItem::Group {
+                kind: GroupKind::ListItem {
+                    term: item.term().cloned(),
+                    position: start.position_of(index),
+                    checkbox: item.checkbox(),
+                },
+                children,
+            });
+        }
+
+        self.push(PlanItem::Group {
+            kind: GroupKind::List {
+                kind: list.kind(),
+                presentation: list.presentation(),
+            },
+            children: items,
+        });
         Ok(())
     }
 
@@ -528,12 +581,18 @@ mod tests {
             plan.items(),
             &[
                 PlanItem::Title(text("Report")),
-                PlanItem::Paragraph(text("Intro.")),
+                PlanItem::Paragraph {
+                    text: text("Intro."),
+                    presentation: ParagraphPresentation::body(),
+                },
                 PlanItem::Heading {
                     text: text("Body"),
                     level: HeadingLevel::new(1).unwrap(),
                 },
-                PlanItem::Paragraph(text("Detail.")),
+                PlanItem::Paragraph {
+                    text: text("Detail."),
+                    presentation: ParagraphPresentation::body(),
+                },
             ]
         );
     }

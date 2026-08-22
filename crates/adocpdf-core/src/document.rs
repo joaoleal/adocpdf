@@ -8,6 +8,7 @@
 use std::error::Error;
 use std::fmt;
 
+use crate::presentation::{ListPresentation, ParagraphPresentation};
 use crate::theme::ThemeId;
 
 /// A presentation applied to a run of inline content.
@@ -30,6 +31,34 @@ pub enum InlineStyle {
     Subscript,
     /// Marked for attention.
     Highlight,
+    /// Ruled beneath.
+    Underline,
+    /// Ruled through.
+    Strikethrough,
+    /// Set larger than the text around it.
+    Larger,
+    /// Set smaller than the text around it.
+    Smaller,
+}
+
+impl InlineStyle {
+    /// The style the role `name` asks for, if this renderer honours it.
+    ///
+    /// A role is a stylesheet class by origin, so most roles mean whatever a
+    /// stylesheet says they mean and there is no stylesheet here. These four
+    /// are the exception: the language documents them as typographic, so their
+    /// meaning is the same wherever they appear. Everything else is reported
+    /// by name rather than guessed at.
+    #[must_use]
+    pub fn from_role(name: &str) -> Option<Self> {
+        match name {
+            "underline" => Some(Self::Underline),
+            "line-through" => Some(Self::Strikethrough),
+            "big" => Some(Self::Larger),
+            "small" => Some(Self::Smaller),
+            _ => None,
+        }
+    }
 }
 
 /// A piece of inline content.
@@ -220,19 +249,36 @@ impl Error for InvalidHeadingLevel {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Paragraph {
     text: InlineText,
+    presentation: ParagraphPresentation,
 }
 
 impl Paragraph {
-    /// Creates a paragraph.
+    /// Creates a paragraph set as the theme sets body text.
     #[must_use]
     pub fn new(text: InlineText) -> Self {
-        Self { text }
+        Self {
+            text,
+            presentation: ParagraphPresentation::body(),
+        }
+    }
+
+    /// Declares how the paragraph is set.
+    #[must_use]
+    pub const fn with_presentation(mut self, presentation: ParagraphPresentation) -> Self {
+        self.presentation = presentation;
+        self
     }
 
     /// The paragraph's text.
     #[must_use]
     pub fn text(&self) -> &InlineText {
         &self.text
+    }
+
+    /// How the paragraph asked to be set.
+    #[must_use]
+    pub const fn presentation(&self) -> ParagraphPresentation {
+        self.presentation
     }
 }
 
@@ -528,14 +574,19 @@ pub enum ListKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListItem {
     term: Option<InlineText>,
+    checkbox: Option<bool>,
     body: Vec<Block>,
 }
 
 impl ListItem {
-    /// Creates an item with no term.
+    /// Creates an item with no term and no checkbox.
     #[must_use]
     pub fn new(body: Vec<Block>) -> Self {
-        Self { term: None, body }
+        Self {
+            term: None,
+            checkbox: None,
+            body,
+        }
     }
 
     /// Gives the item the term it describes.
@@ -548,10 +599,27 @@ impl ListItem {
         self
     }
 
+    /// Marks the item as one whose state a reader can see.
+    ///
+    /// `true` is checked and `false` unchecked. An item with no checkbox at
+    /// all is a third thing — an ordinary item in a list that happens to hold
+    /// checklist items — and is why this is an `Option` rather than a `bool`.
+    #[must_use]
+    pub const fn with_checkbox(mut self, checked: bool) -> Self {
+        self.checkbox = Some(checked);
+        self
+    }
+
     /// The term this item describes, if it has one.
     #[must_use]
     pub fn term(&self) -> Option<&InlineText> {
         self.term.as_ref()
+    }
+
+    /// Whether the item shows a state, and which.
+    #[must_use]
+    pub const fn checkbox(&self) -> Option<bool> {
+        self.checkbox
     }
 
     /// The item's content.
@@ -565,20 +633,38 @@ impl ListItem {
 #[derive(Debug, Clone, PartialEq)]
 pub struct List {
     kind: ListKind,
+    presentation: ListPresentation,
     items: Vec<ListItem>,
 }
 
 impl List {
-    /// Creates a list.
+    /// Creates a list set the way its kind is set by default.
     #[must_use]
     pub fn new(kind: ListKind, items: Vec<ListItem>) -> Self {
-        Self { kind, items }
+        Self {
+            kind,
+            presentation: ListPresentation::stacked(),
+            items,
+        }
+    }
+
+    /// Declares how the list is set.
+    #[must_use]
+    pub const fn with_presentation(mut self, presentation: ListPresentation) -> Self {
+        self.presentation = presentation;
+        self
     }
 
     /// What kind of list it is.
     #[must_use]
     pub const fn kind(&self) -> ListKind {
         self.kind
+    }
+
+    /// How the list asked to be set.
+    #[must_use]
+    pub const fn presentation(&self) -> ListPresentation {
+        self.presentation
     }
 
     /// Its items, in order.
@@ -602,6 +688,18 @@ pub enum BreakKind {
 pub enum Block {
     /// A section and everything nested beneath it.
     Section(Section),
+    /// A heading that takes no part in the section hierarchy.
+    ///
+    /// What AsciiDoc calls a *discrete* heading. It is set as a heading and is
+    /// nothing else: it opens no section, so the blocks after it belong to
+    /// whatever encloses it, and the level of a section heading following it is
+    /// the level that section would have had anyway.
+    Heading {
+        /// The heading text.
+        text: InlineText,
+        /// How deeply it appears to be nested.
+        level: HeadingLevel,
+    },
     /// A paragraph of body text.
     Paragraph(Paragraph),
     /// Content preserved exactly as written.
@@ -678,6 +776,8 @@ impl Document {
 
 #[cfg(test)]
 mod tests {
+    use crate::presentation::{Alignment, ListPresentation, ListStart, ParagraphPresentation};
+
     use super::*;
 
     fn text(value: &str) -> InlineText {
@@ -715,6 +815,64 @@ mod tests {
         };
         assert_eq!(nested.heading().plain_text(), "Details");
         assert_eq!(nested.level().get(), 2);
+    }
+
+    #[test]
+    fn a_paragraph_is_body_text_unless_it_declares_otherwise() {
+        let paragraph = Paragraph::new(text("Words."));
+
+        assert!(paragraph.presentation().is_body());
+    }
+
+    #[test]
+    fn a_paragraph_remembers_the_presentation_it_declares() {
+        let paragraph = Paragraph::new(text("Words."))
+            .with_presentation(ParagraphPresentation::body().with_alignment(Alignment::Center));
+
+        assert_eq!(
+            paragraph.presentation().alignment(),
+            Some(Alignment::Center)
+        );
+    }
+
+    #[test]
+    fn a_list_item_shows_no_state_unless_it_is_given_one() {
+        assert_eq!(ListItem::new(Vec::new()).checkbox(), None);
+        assert_eq!(
+            ListItem::new(Vec::new()).with_checkbox(true).checkbox(),
+            Some(true)
+        );
+        assert_eq!(
+            ListItem::new(Vec::new()).with_checkbox(false).checkbox(),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn a_list_remembers_the_presentation_it_declares() {
+        let list = List::new(ListKind::Ordered, Vec::new()).with_presentation(
+            ListPresentation::stacked().with_start(ListStart::parse("4").unwrap()),
+        );
+
+        assert_eq!(list.presentation().start().get(), 4);
+    }
+
+    #[test]
+    fn a_discrete_heading_holds_no_content_of_its_own() {
+        let block = Block::Heading {
+            text: text("Aside"),
+            level: level(2),
+        };
+
+        let Block::Heading {
+            text: heading,
+            level: at,
+        } = &block
+        else {
+            panic!("expected a heading block");
+        };
+        assert_eq!(heading.plain_text(), "Aside");
+        assert_eq!(at.get(), 2);
     }
 
     #[test]
@@ -779,6 +937,39 @@ mod tests {
             *inner,
             InlineStyle::Emphasis,
             "nesting carries both presentations"
+        );
+    }
+
+    #[test]
+    fn each_role_driven_style_survives_a_round_trip_through_inline_text() {
+        for (role, style) in [
+            ("underline", InlineStyle::Underline),
+            ("line-through", InlineStyle::Strikethrough),
+            ("big", InlineStyle::Larger),
+            ("small", InlineStyle::Smaller),
+        ] {
+            assert_eq!(InlineStyle::from_role(role), Some(style));
+
+            let text = InlineText::from_nodes(vec![InlineNode::styled(
+                style,
+                vec![InlineNode::text("word")],
+            )]);
+
+            let [InlineNode::Styled { style: kept, .. }] = text.nodes() else {
+                panic!("expected one styled node for {role}");
+            };
+            assert_eq!(*kept, style);
+            assert_eq!(text.plain_text(), "word");
+        }
+    }
+
+    #[test]
+    fn a_role_this_renderer_has_no_meaning_for_names_no_style() {
+        assert_eq!(InlineStyle::from_role("myrole"), None);
+        assert_eq!(
+            InlineStyle::from_role("lead"),
+            None,
+            "a lead paragraph is block presentation, not an inline style"
         );
     }
 

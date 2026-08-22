@@ -15,17 +15,28 @@ maintained by hope.
 adocpdf book.adoc book.pdf
 ```
 
-- Document title, section headings (nested), paragraphs.
+- Document title, section headings (nested), paragraphs. A `[discrete]` heading
+  is set as a heading and takes no part in the section hierarchy.
 - **Inline formatting**: bold, italic, monospace, superscript, subscript and
   highlight, nested to any depth, plus curved quotes, em dashes, ellipses,
   arrows and the other character replacements. Attribute references resolve;
-  an undefined one is reported rather than silently emptied.
+  an undefined one is reported rather than silently emptied. The roles the
+  language gives a typographic meaning are honoured — `[.underline]`,
+  `[.line-through]`, `[.big]` and `[.small]` — and compose with the styles
+  above.
 - **Blocks**: literal, listing, source and fenced code blocks set verbatim in a
   monospace face; all five admonitions in both their forms; quotes and verses
   with attribution; examples, sidebars and open blocks, nested; thematic and
   page breaks; block titles; comments.
 - **Lists**: unordered, ordered and description lists, nested, with
-  continuation.
+  continuation. A list may declare its marker shape (`[circle]`, `[square]`,
+  `[disc]`) or the number it counts from (`[start=4]`); a description list may
+  be set horizontally (`[horizontal]`) or as questions and answers
+  (`[qanda]`); and `* [x]` / `* [ ]` render as a checklist whose markers show
+  what is done.
+- **Paragraph presentation**: `[.text-left]`, `[.text-center]`, `[.text-right]`
+  and `[.text-justify]` set one paragraph without touching the ones around it,
+  and `[.lead]` sets an opening passage apart from body text.
 - Per-section themes: a section can declare `[theme=wide]` or
   `[theme=large-print]` and the section plus everything nested inside it renders
   under that theme.
@@ -46,7 +57,9 @@ adocpdf book.adoc book.pdf
   never silently dropped and never fatal. An unsupported *inline* construct
   still puts its text on the page, so a sentence never loses a phrase; an
   unsupported *block* is reported rather than re-flowed into the text around
-  it.
+  it. A role outside the honoured set is reported by name and its text still
+  rendered: a role is a stylesheet class by origin, and there is no stylesheet
+  here to say what `[.warning]` should look like.
 
 ```
 adocpdf <INPUT> <OUTPUT> [--project-root DIR] [--date YYYY-MM-DD]
