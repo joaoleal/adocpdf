@@ -50,11 +50,17 @@ jobs:
           tool: cargo-mutants@27.1.0
 
       # This step is the gate on mutation testing, and its scope is exactly the
-      # two files named. A survivor here fails the workflow.
-      - name: Mutate the injection boundary and the sandbox rule
+      # three files named. A survivor here fails the workflow.
+      #
+      # `inline.rs` earns its place for the same reason as the other two: it
+      # decides what counts as structure and what counts as text. A mutant that
+      # widened that boundary — treating a marker as content, or content as a
+      # marker — would let a document forge formatting, so a test must notice.
+      - name: Mutate the injection boundary, the inline decoder and the sandbox rule
         run: |
           cargo mutants --no-shuffle \
             --file crates/adocpdf-infra/src/markup.rs \
+            --file crates/adocpdf-infra/src/inline.rs \
             --file crates/adocpdf-domain/src/sandbox.rs
 
       - name: Upload the enforced-file report

@@ -98,6 +98,20 @@ the output through `markup::string_literal` and nothing else. Structural
 instructions are built only from validated model values. Adding a new emitter
 path that interpolates source text directly is an injection.
 
+**Structure is spelled in an alphabet the document cannot type.** Inline
+structure crosses from the parser to the model as characters in a string, and
+the characters it uses are Unicode noncharacters (U+FDD0–U+FDEF), which
+`parser::refuse_input_that_could_forge_structure` refuses in source. That is
+what makes a forged span impossible rather than merely escaped — and it is load
+bearing, because `pass:[…]` and `+++…+++` reach the parser's output verbatim,
+without substitution. Never introduce an in-band encoding whose alphabet a
+document can type, and never relax the guard.
+
+Relatedly: special characters must be rendered as `&lt;`, `&gt;` and `&amp;`
+and no other spelling. Later substitution steps in `asciidoc-parser` match
+those exact strings — the arrow replacements are `Regex::new(r"\\?-&gt;")` —
+so a different encoding silently stops them firing.
+
 **Paths are judged by where they resolve, not how they are spelled.** The
 containment rule lives in `adocpdf-domain::sandbox`; resolution is the
 `PathResolver` port. Never add a filesystem call that bypasses `SandboxedPath`.
@@ -142,10 +156,10 @@ on a schedule instead. None of them is a substitute for a test.
 | `cargo-mutants` | would any test have noticed if this code were wrong | `.github/workflows/mutants.yml`, weekly |
 
 **Property tests are the exception — they are in the gate**, because they are
-ordinary `#[test]`s. `crates/adocpdf-infra/src/markup.rs` and
-`crates/adocpdf-domain/src/sandbox.rs` each carry a `properties` module, and
-`crates/adocpdf-infra/tests/injection.rs` runs the same claim through the real
-engine at a lower case count. Failing seeds are saved to
+ordinary `#[test]`s. `crates/adocpdf-infra/src/markup.rs`,
+`crates/adocpdf-infra/src/inline.rs` and `crates/adocpdf-domain/src/sandbox.rs`
+each carry a `properties` module, and `crates/adocpdf-infra/tests/injection.rs`
+runs the same claims through the real engine at a lower case count. Failing seeds are saved to
 `proptest-regressions/` and **are committed** — that directory is a record of
 every counterexample ever found, and deleting it throws that away.
 
@@ -169,9 +183,9 @@ and NCSA is not in `deny.toml`'s allow-list — see the note in that file.
 **What none of this proves.** The gate does not cover fuzzing or mutation
 testing. A green gate means the checks in `scripts/ci/gate.sh` passed; it says
 nothing about whether the fuzzer has found something since, and mutation
-testing is enforced on two files only — the injection boundary and the sandbox
-rule — with the rest of the workspace reported as information and no threshold
-applied.
+testing is enforced on three files only — the injection boundary, the inline
+decoder and the sandbox rule — with the rest of the workspace reported as
+information and no threshold applied.
 
 ### The one check that is not in the gate
 

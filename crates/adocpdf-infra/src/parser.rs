@@ -9,21 +9,37 @@
 //!   reach outside itself through includes or file-reading macros. That is the
 //!   `project-sandbox` requirement enforced at the point where document content
 //!   could otherwise widen file access.
-//! - Paragraph text is taken from the **source span**, not from the parser's
-//!   rendered output. Rendered output is HTML, and this renderer does not
-//!   produce HTML — feeding it through would put literal tags on the page.
-//!   Taking the source means inline formatting is not interpreted yet, which
-//!   matches the change's stated non-goal.
+//! - Inline content comes from the parser's rendered output, with this crate's
+//!   own [`crate::inline::TypesetRenderer`] installed in place
+//!   of the built-in HTML one. Taking the **source span** instead — as this
+//!   adapter once did — leaves inline formatting uninterpreted and puts `*` and
+//!   `_` on the page as literal characters. Taking the rendered output *without*
+//!   replacing the renderer would put HTML tags there instead.
 
-use adocpdf_core::document::{Block, Document, HeadingLevel, InlineText, Paragraph, Section};
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
+use adocpdf_core::document::{
+    Admonition, AdmonitionKind, Block, BreakKind, Container, ContainerKind, Document, HeadingLevel,
+    InlineText, List, ListItem, ListKind, Paragraph, Quotation, QuotationKind, Section, Verbatim,
+    VerbatimKind,
+};
 use adocpdf_core::theme::ThemeId;
 use adocpdf_domain::error::{DomainError, SourceLocation};
 use adocpdf_domain::ports::{Date, DocumentParser, ParseOutcome, SkippedConstruct};
 use asciidoc_parser::blocks::FindBlocks;
-use asciidoc_parser::blocks::{Block as SourceBlock, IsBlock};
-use asciidoc_parser::{HasSpan, Parser, ReferenceTime, SafeMode, Span};
+use asciidoc_parser::blocks::{
+    AdmonitionVariant, Block as SourceBlock, BreakType, CompoundDelimitedContext, IsBlock,
+    ListItemMarker, ListType as SourceListType, QuoteType as SourceQuoteType, SimpleBlockStyle,
+};
+use asciidoc_parser::parser::ModificationContext;
+use asciidoc_parser::warnings::WarningType;
+use asciidoc_parser::{Document as ParsedDocument, HasSpan, Parser, ReferenceTime, SafeMode, Span};
 
 use crate::clock::unix_timestamp;
+use crate::inline::{
+    DecodedInline, TypesetRenderer, decode, decode_keeping_line_breaks, decode_preserving_text,
+    is_parser_sentinel, is_reserved_marker,
+};
 
 /// The block attribute a section uses to declare its theme.
 ///
@@ -50,15 +66,30 @@ impl AsciidocParser {
 impl DocumentParser for AsciidocParser {
     fn parse(&self, source: &str, origin: &str, today: Date) -> Result<ParseOutcome, DomainError> {
         refuse_input_that_would_not_terminate(source, origin)?;
+        refuse_input_with_an_unterminating_carriage_return(source, origin)?;
+        refuse_input_that_could_forge_structure(source, origin)?;
 
-        let parsed = Parser::default()
+        let mut parser = Parser::default()
             // The most restrictive mode: no includes, no file-reading macros.
             // A document must not be able to widen its own access.
             .with_safe_mode(SafeMode::Secure)
             // The reference time is injected so that a document resolving a
             // date attribute renders the same whenever it is built.
             .with_reference_time(ReferenceTime::from_unix_timestamp(unix_timestamp(today)))
-            .parse(source);
+            // Inline substitutions are rendered as structure this crate can
+            // decode, rather than as the HTML the built-in renderer produces.
+            .with_inline_substitution_renderer(TypesetRenderer::new())
+            // Asks the parser to say when a document references an attribute
+            // that was never set. Without this it silently leaves the
+            // reference as written, and the author is never told which name
+            // went unresolved. The document may still override it.
+            .with_intrinsic_attribute(
+                "attribute-missing",
+                "warn",
+                ModificationContext::ApiOrDocumentBody,
+            );
+
+        let parsed = parse_without_letting_a_panic_escape(&mut parser, source, origin)?;
 
         let mut mapper = Mapper {
             skipped: Vec::new(),
@@ -66,11 +97,28 @@ impl DocumentParser for AsciidocParser {
 
         let mut document = Document::new();
         if let Some(title) = parsed.doctitle() {
-            document = document.with_title(InlineText::new(title));
+            // The document title is inline content like any other. It used to
+            // be taken verbatim from `doctitle()`, which returns *rendered*
+            // output — so a title reading `= *Bold* Title` put a literal
+            // `<strong>` on the page.
+            document = document.with_title(mapper.inline(title, SourceLocation::START));
         }
         for block in parsed.child_blocks() {
             for mapped in mapper.blocks(block) {
                 document = document.with_block(mapped);
+            }
+        }
+
+        // An unresolved attribute reference is not a block the mapper walks
+        // past — the parser reports it as a warning, with the name and the
+        // place it was referenced. Both are better than anything reconstructed
+        // from the rendered text afterwards.
+        for warning in parsed.warnings() {
+            if let WarningType::SkippingReferenceToMissingAttribute(name) = &warning.warning {
+                mapper.skipped.push(SkippedConstruct {
+                    construct: format!("reference to attribute {name:?}, which is not set"),
+                    location: location_of(warning.source),
+                });
             }
         }
 
@@ -81,29 +129,44 @@ impl DocumentParser for AsciidocParser {
     }
 }
 
-/// Characters that stop `asciidoc-parser` returning, and the shape of document
-/// in which they do it.
+/// Characters `asciidoc-parser` cannot be trusted to finish reading.
 ///
 /// # The defect
 ///
-/// `asciidoc-parser` 0.29.19 does not terminate on a document that contains a
-/// vertical tab or a form feed and nothing else of substance.
-/// `Parser::parse("\u{c}")` spins indefinitely — verified against the crate
-/// directly, with none of this module's code involved, so this is upstream and
-/// not a mapping error here. It was found by the `parse_plan_emit` fuzz target
-/// and minimised to a single byte.
+/// `asciidoc-parser` 0.29.19 does not terminate on a range of documents
+/// containing a vertical tab or a form feed. `Parser::parse("\u{c}")` spins
+/// indefinitely — verified against the crate directly, with none of this
+/// module's code involved, so this is upstream and not a mapping error here.
 ///
-/// `SECURITY.md` classifies a hang on untrusted input as a vulnerability
-/// rather than a rendering bug, which is why this is refused rather than
-/// tolerated.
+/// # Why the whole character is refused, rather than a shape it appears in
 ///
-/// # Why the condition is this narrow
+/// Because three narrower rules were tried and all three were wrong. The fuzz
+/// target found each of them in turn:
 ///
-/// Every C0, DEL and C1 character was probed against the real parser, alone
-/// and embedded in text. Exactly two hang, and only when the document holds no
-/// non-whitespace character: `"Hello\u{c}world"`, `"a\u{c}"` and `"\u{c}a"`
-/// all parse normally and must keep doing so. Refusing every form feed would
-/// break documents that work today.
+/// 1. First the guard refused these characters in a **whitespace-only
+///    document**, which is the shape every example then in hand had. Fuzzing
+///    later produced `"[;;\u{a}\u{b}"` — a document with real content — which
+///    hangs just the same.
+/// 2. Then it refused them on a **line holding nothing else**, which covered
+///    every case measured at that point. Fuzzing then produced
+///    `";toc::  \u{c}"`, where the character shares its line with content.
+/// 3. What survives is the character itself.
+///
+/// Each narrower rule was an attempt to model an upstream defect precisely
+/// enough to refuse only what genuinely hangs. That is the wrong goal: the
+/// defect is not a specification, it is a bug, and its shape can change with
+/// any input nobody has tried yet. A rule about the character cannot be
+/// outflanked that way.
+///
+/// # What this costs
+///
+/// `"Hello\u{c}world"` used to render and is now refused. That was a
+/// deliberate allowance, and giving it up is the price of a rule that cannot
+/// be outflanked. It is a small price: a vertical tab or form feed in AsciiDoc
+/// source is malformed text in any case, produced by no editor and meaning
+/// nothing in the language. The specification permits a conservative refusal
+/// whose cost is bounded and stated, and this one is bounded to two characters
+/// that no document should contain.
 ///
 /// # When to delete this
 ///
@@ -118,35 +181,254 @@ const CHARACTERS_UPSTREAM_CANNOT_PARSE: [char; 2] = ['\u{b}', '\u{c}'];
 /// # Errors
 ///
 /// Returns [`DomainError::ParseFailed`] naming the offending character when
-/// `source` holds one of [`CHARACTERS_UPSTREAM_CANNOT_PARSE`] and contains
-/// nothing but whitespace.
+/// `source` contains any of [`CHARACTERS_UPSTREAM_CANNOT_PARSE`].
 fn refuse_input_that_would_not_terminate(source: &str, origin: &str) -> Result<(), DomainError> {
-    // A document with any real content in it parses fine, whatever control
-    // characters sit beside that content. Checking this first also means the
-    // scan stops early for every ordinary document.
-    if source.chars().any(|character| !character.is_whitespace()) {
-        return Ok(());
-    }
-
-    let Some(offender) = source
-        .chars()
-        .find(|character| CHARACTERS_UPSTREAM_CANNOT_PARSE.contains(character))
+    let Some((offset, offender)) = source
+        .char_indices()
+        .find(|(_, character)| CHARACTERS_UPSTREAM_CANNOT_PARSE.contains(character))
     else {
         return Ok(());
     };
 
     Err(DomainError::ParseFailed {
         path: origin.to_owned(),
-        // The document is nothing but whitespace, so there is no meaningful
-        // position to report beyond its beginning.
-        location: SourceLocation::START,
+        location: location_of_offset(source, offset),
         reason: format!(
-            "the document contains U+{:04X} and no other content; \
-             asciidoc-parser 0.29.19 does not terminate on such a document, \
-             so it is refused rather than rendered",
+            "the document contains U+{:04X}; asciidoc-parser 0.29.19 does not reliably \
+             terminate on a document containing that character, so it is refused rather \
+             than rendered",
             offender as u32
         ),
     })
+}
+
+/// Declines a document holding a carriage return the parser cannot finish
+/// reading.
+///
+/// # The defect
+///
+/// `asciidoc-parser` 0.29.19 does not terminate on a document containing a
+/// carriage return immediately followed by whitespace that is not a line feed.
+/// `Parser::parse("\r\r")` spins indefinitely, and so do `"\r\t"`, `"\r "` and
+/// `"= T\n\n\r\r"` — the last of which has a title and real content in it. It
+/// was found by the `parse_plan_emit` fuzz target, which minimised it to
+/// `"\n\r\r\r"`.
+///
+/// This is a second defect of the same family as
+/// [`CHARACTERS_UPSTREAM_CANNOT_PARSE`], not the same one. That guard refuses
+/// only documents with no real content, which is the whole shape of the
+/// vertical-tab and form-feed hang. This one hangs on documents that do have
+/// content, so it needs a condition of its own.
+///
+/// # What was measured
+///
+/// Every string of length four or less over `{CR, LF, tab, space, 'a'}` was
+/// probed against the real parser — 780 inputs, of which 138 do not return.
+/// **Every one of those 138 contains this pattern**, and so does every longer
+/// hanging case found by hand. The pattern is therefore known to be necessary;
+/// no input is missed.
+///
+/// # Why the refusal is deliberately wider than the defect
+///
+/// The pattern is necessary but not sufficient: 81 of the probed inputs
+/// contain it and still return — `"\r\ra"` and `"a\r\r"` among them. Refusing
+/// those is a choice, made because the exact condition depends on block
+/// structure in a way that is not stable enough to encode against an upstream
+/// defect that should be fixed rather than modelled. The specification permits
+/// it: a refusal may be conservative where the alternative is a render that
+/// never finishes, and a renderer that declines a stray carriage return is a
+/// nuisance where one that never returns is a vulnerability.
+///
+/// The cost is bounded, and deliberately so:
+///
+/// - **Windows line endings are unaffected.** In CRLF text every carriage
+///   return is followed by a line feed, which this pattern excludes. A CRLF
+///   document of any size never trips it.
+/// - **A carriage return followed by text is unaffected**, so `"\ra"` still
+///   renders.
+///
+/// What is refused is a bare carriage return followed by another space, tab or
+/// carriage return — which no line-ending convention produces, and which is
+/// malformed text by any reading.
+///
+/// # When to delete this
+///
+/// When a released `asciidoc-parser` terminates on these inputs and this
+/// workspace has adopted it. The regression tests do not depend on this
+/// function and will then pass because the defect is gone.
+fn refuse_input_with_an_unterminating_carriage_return(
+    source: &str,
+    origin: &str,
+) -> Result<(), DomainError> {
+    let mut characters = source.char_indices().peekable();
+
+    while let Some((offset, character)) = characters.next() {
+        if character != '\r' {
+            continue;
+        }
+
+        let Some(&(_, next)) = characters.peek() else {
+            // A carriage return ending the document is fine: there is nothing
+            // after it for the parser to get stuck on.
+            break;
+        };
+
+        if next.is_whitespace() && next != '\n' {
+            return Err(DomainError::ParseFailed {
+                path: origin.to_owned(),
+                location: location_of_offset(source, offset),
+                reason: format!(
+                    "a carriage return is followed by U+{:04X} rather than by a line feed; \
+                     asciidoc-parser 0.29.19 does not terminate on that sequence, so it is \
+                     refused rather than rendered",
+                    next as u32
+                ),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+// Why two ranges are refused, and why the predicates live in `crate::inline`
+// rather than here.
+//
+// **This crate's markers.** Unicode permanently reserves U+FDD0–U+FDEF as
+// *noncharacters*: they are guaranteed never to be assigned, and the standard
+// forbids their use in open interchange. That is what makes them usable as a
+// marker alphabet — a legitimate AsciiDoc document does not contain one, so a
+// marker in the parser's output can only have come from this crate. The
+// guarantee only holds if it is enforced: `pass:[…]` and `+++…+++` reach the
+// rendered output verbatim, so an author could otherwise type a marker
+// straight into the stream the decoder reads and forge inline structure.
+// Refusing the range at the door closes that channel, and is why the injection
+// property can be stated as a property rather than as a list of examples.
+//
+// **The parser's sentinels.** U+E000 and U+E001 bracket a cross-reference
+// placeholder in the parser's rendered output, and U+E002 and U+E003 bracket a
+// footnote marker (`src/content/content.rs:138`–`154`). The crate's own comment
+// says they "cannot collide with user text", and that is not so: a document can
+// type one. On `"*\u{e000}<<>>"` the parser reaches
+// `debug_assert!(false, "xref placeholder index {body:?} out of range")` — a
+// panic in a debug build, a corrupt placeholder in a release one. It is the
+// same hazard this crate avoids by drawing its markers from noncharacters
+// rather than from the private use area, which documents legitimately contain.
+//
+// **Why `crate::inline` owns both predicates.** This guard is not the only
+// place a reserved character can appear. A numeric character reference is
+// resolved *after* the guard has run, by the decoder, which has to refuse the
+// same two ranges. When each side kept its own copy they drifted: the decoder
+// knew about the noncharacters and not about the sentinels, so `&#xE000;` went
+// straight past a guard written to refuse U+E000. One definition, used by both.
+
+/// Declines a document containing a character reserved as a marker, by this
+/// crate or by the parser it wraps.
+///
+/// # Errors
+///
+/// Returns [`DomainError::ParseFailed`] naming the offending code point when
+/// `source` contains a character this crate reserves for markers or one the
+/// parser reserves for its own placeholders.
+fn refuse_input_that_could_forge_structure(source: &str, origin: &str) -> Result<(), DomainError> {
+    let Some((offset, offender)) = source
+        .char_indices()
+        .find(|(_, character)| is_reserved_marker(*character) || is_parser_sentinel(*character))
+    else {
+        return Ok(());
+    };
+
+    let reason = if is_reserved_marker(offender) {
+        format!(
+            "the document contains U+{:04X}, a Unicode noncharacter reserved by this \
+             renderer for marking inline structure; such a character must not appear in \
+             interchanged text, and accepting it would let the document forge formatting \
+             it did not write",
+            offender as u32
+        )
+    } else {
+        format!(
+            "the document contains U+{:04X}, which asciidoc-parser 0.29.19 reserves for \
+             its own cross-reference and footnote placeholders; a document containing one \
+             makes the parser misread its own output, so it is refused rather than \
+             rendered",
+            offender as u32
+        )
+    };
+
+    Err(DomainError::ParseFailed {
+        path: origin.to_owned(),
+        location: location_of_offset(source, offset),
+        reason,
+    })
+}
+
+/// Runs the upstream parser, turning a panic inside it into a refusal.
+///
+/// The three guards above refuse inputs the parser cannot *finish*. This one
+/// covers the other way it fails: `asciidoc-parser` 0.29.19 panics on an inline
+/// `image:` or `icon:` macro with no target, because the regex makes the target
+/// group optional and the replacer indexes it unconditionally
+/// (`content/macros.rs:291`). `image:[alt]` is enough — a typo in an ordinary
+/// document, not an adversarial input. A second case, found by the fuzz run
+/// that verified this guard, trips a `debug_assert!` on a block attribute list
+/// combining `%` shorthands (`attributes/element_attribute.rs:509`); it is
+/// contained here too, without a rule of its own.
+///
+/// It is caught here rather than refused before parsing because no rule about
+/// the source text can decide it. Attribute references are substituted *before*
+/// macros, so the macro name need never appear in the source:
+///
+/// ```asciidoc
+/// :foo: imag
+/// {foo}e:[]
+/// ```
+///
+/// still panics, and any guard reading the source misses it. Catching the
+/// unwind is the only rule that cannot be outflanked, and it covers whatever
+/// upstream panics next as well.
+///
+/// The cost, stated: this crate's own [`TypesetRenderer`] runs *inside* `parse`
+/// as a substitution callback, so a panic in it would be reported as a refusal
+/// rather than crashing. The process-wide panic hook is deliberately left
+/// alone — a library must not silence panic reporting for its host — so the
+/// hook's message still reaches stderr ahead of the error returned here.
+///
+/// # Errors
+///
+/// Returns [`DomainError::ParseFailed`] when the parser panics.
+fn parse_without_letting_a_panic_escape(
+    parser: &mut Parser,
+    source: &str,
+    origin: &str,
+) -> Result<ParsedDocument<'static>, DomainError> {
+    // `AssertUnwindSafe` because the parser is dropped on the error path below
+    // and never read after a panic; nothing observes whatever state it was left
+    // in.
+    catch_unwind(AssertUnwindSafe(|| parser.parse(source))).map_err(|_| DomainError::ParseFailed {
+        path: origin.to_owned(),
+        location: SourceLocation::START,
+        reason: "asciidoc-parser 0.29.19 panicked while parsing this document. Two \
+                 causes are known: an inline image: or icon: macro written with no \
+                 target, as in image:[alt], and a block attribute list combining % \
+                 shorthands. The document is refused rather than rendered, because a \
+                 panic cannot be recovered from far enough to trust what was parsed"
+            .to_owned(),
+    })
+}
+
+/// Locates a byte offset within the source, counting from one.
+fn location_of_offset(source: &str, offset: usize) -> SourceLocation {
+    let consumed = &source[..offset];
+    let line = consumed.matches('\n').count() + 1;
+    let column = consumed.rfind('\n').map_or_else(
+        || consumed.chars().count(),
+        |index| consumed[index + 1..].chars().count(),
+    ) + 1;
+
+    SourceLocation::new(
+        u32::try_from(line).unwrap_or(1),
+        u32::try_from(column).unwrap_or(1),
+    )
 }
 
 /// Maps parsed blocks into the document model, collecting what it cannot.
@@ -165,33 +447,42 @@ impl Mapper {
     /// wrongly suggest something was lost.
     fn blocks(&mut self, block: &SourceBlock<'_>) -> Vec<Block> {
         match block {
-            SourceBlock::Simple(simple) => {
-                let text = simple.content().original().data().trim_end();
-                if text.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![Block::Paragraph(Paragraph::new(InlineText::new(text)))]
+            SourceBlock::Simple(simple) => self.simple(simple, block),
+
+            SourceBlock::Section(source_section) => self.section(source_section),
+
+            SourceBlock::RawDelimited(raw) => {
+                match Self::verbatim(raw) {
+                    // A comment maps to nothing, and nothing cannot carry a title.
+                    mapped if mapped.is_empty() => mapped,
+                    mut mapped => self.titled(block, mapped.remove(0)),
                 }
             }
 
-            SourceBlock::Section(source_section) => {
-                let mut section = Section::new(
-                    InlineText::new(source_section.section_title()),
-                    clamp_level(source_section.level()),
-                );
+            SourceBlock::Admonition(admonition) => self.admonition(admonition, block),
 
-                if let Some(id) = self.declared_theme(source_section) {
-                    section = section.with_theme(id);
-                }
+            SourceBlock::Quote(quote) => self.quotation(quote, block),
 
-                for child in source_section.child_blocks() {
-                    for mapped in self.blocks(child) {
-                        section = section.with_block(mapped);
-                    }
-                }
+            SourceBlock::CompoundDelimited(compound) => {
+                let kind = match compound.context_kind() {
+                    CompoundDelimitedContext::Example => ContainerKind::Example,
+                    CompoundDelimitedContext::Sidebar => ContainerKind::Sidebar,
+                    CompoundDelimitedContext::Open => ContainerKind::Open,
+                };
+                let body = self.children(compound.child_blocks());
 
-                vec![Block::Section(section)]
+                self.titled(block, Block::Container(Container::new(kind, body)))
             }
+
+            SourceBlock::Break(source_break) => {
+                let kind = match source_break.type_() {
+                    BreakType::Page => BreakKind::Page,
+                    BreakType::Thematic => BreakKind::Thematic,
+                };
+                vec![Block::Break(kind)]
+            }
+
+            SourceBlock::List(list) => self.list(list, block),
 
             // A transparent container: its children belong to whatever holds it.
             SourceBlock::Preamble(preamble) => preamble
@@ -205,6 +496,134 @@ impl Mapper {
             other => {
                 self.skip(describe(other), other.span());
                 Vec::new()
+            }
+        }
+    }
+
+    /// Maps a simple block: a paragraph, or an indented literal one.
+    fn simple(
+        &mut self,
+        simple: &asciidoc_parser::blocks::SimpleBlock<'_>,
+        block: &SourceBlock<'_>,
+    ) -> Vec<Block> {
+        // An indented paragraph is a literal block, not body text: the
+        // indentation is the author asking for it to be left alone.
+        if simple.style() != SimpleBlockStyle::Paragraph {
+            let content = Self::verbatim_content(simple.content());
+            let kind = match simple.style() {
+                SimpleBlockStyle::Listing => VerbatimKind::Listing,
+                SimpleBlockStyle::Source => VerbatimKind::Source,
+                _ => VerbatimKind::Literal,
+            };
+            return self.titled(block, Block::Verbatim(Verbatim::new(kind, content)));
+        }
+
+        let rendered = simple.content().rendered().trim_end();
+        let text = self.inline(rendered, location_of(simple.span()));
+        if text.is_empty() {
+            Vec::new()
+        } else {
+            self.titled(block, Block::Paragraph(Paragraph::new(text)))
+        }
+    }
+
+    /// Maps a section and everything nested inside it.
+    fn section(
+        &mut self,
+        source_section: &asciidoc_parser::blocks::SectionBlock<'_>,
+    ) -> Vec<Block> {
+        let heading = self.inline(
+            source_section.section_title(),
+            location_of(source_section.span()),
+        );
+        let mut section = Section::new(heading, clamp_level(source_section.level()));
+
+        if let Some(id) = self.declared_theme(source_section) {
+            section = section.with_theme(id);
+        }
+
+        for child in source_section.child_blocks() {
+            for mapped in self.blocks(child) {
+                section = section.with_block(mapped);
+            }
+        }
+
+        vec![Block::Section(section)]
+    }
+
+    /// Maps an admonition, in either of the two forms it can take.
+    fn admonition(
+        &mut self,
+        admonition: &asciidoc_parser::blocks::AdmonitionBlock<'_>,
+        block: &SourceBlock<'_>,
+    ) -> Vec<Block> {
+        {
+            {
+                let kind = match admonition.variant() {
+                    AdmonitionVariant::Note => AdmonitionKind::Note,
+                    AdmonitionVariant::Tip => AdmonitionKind::Tip,
+                    AdmonitionVariant::Important => AdmonitionKind::Important,
+                    AdmonitionVariant::Caution => AdmonitionKind::Caution,
+                    AdmonitionVariant::Warning => AdmonitionKind::Warning,
+                };
+
+                // The single-paragraph form carries its text directly; the
+                // delimited form carries child blocks instead.
+                let body = if let Some(content) = admonition.content() {
+                    vec![Block::Paragraph(Paragraph::new(self.inline(
+                        content.rendered().trim_end(),
+                        location_of(admonition.span()),
+                    )))]
+                } else {
+                    self.children(admonition.child_blocks())
+                };
+
+                self.titled(block, Block::Admonition(Admonition::new(kind, body)))
+            }
+        }
+    }
+
+    /// Maps a quotation, prose or verse, with whatever attribution it carries.
+    fn quotation(
+        &mut self,
+        quote: &asciidoc_parser::blocks::QuoteBlock<'_>,
+        block: &SourceBlock<'_>,
+    ) -> Vec<Block> {
+        {
+            {
+                let kind = match quote.type_() {
+                    SourceQuoteType::Verse => QuotationKind::Verse,
+                    SourceQuoteType::Quote => QuotationKind::Quote,
+                };
+
+                let body = if let Some(content) = quote.content() {
+                    let rendered = content.rendered();
+                    let rendered = rendered.trim_end();
+                    let location = location_of(quote.span());
+                    // A verse's line endings are the content — the shape of the
+                    // lines is what makes it a verse — so they become explicit
+                    // breaks. A quote is prose and is filled like any other
+                    // paragraph.
+                    let text = if kind == QuotationKind::Verse {
+                        self.inline_keeping_line_breaks(rendered, location)
+                    } else {
+                        self.inline(rendered, location)
+                    };
+                    vec![Block::Paragraph(Paragraph::new(text))]
+                } else {
+                    self.children(quote.child_blocks())
+                };
+
+                let mut quotation = Quotation::new(kind, body);
+                let location = location_of(quote.span());
+                if let Some(attribution) = quote.attribution() {
+                    quotation = quotation.with_attribution(self.inline(attribution, location));
+                }
+                if let Some(citation) = quote.citetitle() {
+                    quotation = quotation.with_citation(self.inline(citation, location));
+                }
+
+                self.titled(block, Block::Quotation(quotation))
             }
         }
     }
@@ -231,6 +650,129 @@ impl Mapper {
                 None
             }
         }
+    }
+
+    /// Maps a delimited block whose content is kept exactly as written.
+    ///
+    /// A comment block is dropped and *not* reported: the author asked for it
+    /// to be left out, so naming it as a skipped construct would report the
+    /// renderer doing exactly what was asked.
+    fn verbatim(raw: &asciidoc_parser::blocks::RawDelimitedBlock<'_>) -> Vec<Block> {
+        let context = raw.resolved_context().to_string();
+        if context == "comment" {
+            return Vec::new();
+        }
+
+        let kind = match context.as_str() {
+            "literal" => VerbatimKind::Literal,
+            "source" => VerbatimKind::Source,
+            // A passthrough or stem block has no target format to pass through
+            // to, so its content is set as written, which is what a literal
+            // block is.
+            _ => VerbatimKind::Listing,
+        };
+
+        vec![Block::Verbatim(Verbatim::new(
+            kind,
+            Self::verbatim_content(raw.content()),
+        ))]
+    }
+
+    /// The text of a verbatim block, with the parser's escaping undone.
+    ///
+    /// Verbatim content still passes through the special-character
+    /// substitution, so `<` arrives as `&lt;`. Decoding gives back what the
+    /// author typed; there is no structure to find, because no other
+    /// substitution ran.
+    fn verbatim_content(content: &asciidoc_parser::content::Content<'_>) -> String {
+        // Decoded, but otherwise untouched: a verbatim block is read for its
+        // characters, so every space and newline in it is one the author typed.
+        // Paragraphs are filled instead — see `inline`.
+        decode_preserving_text(content.rendered().trim_end())
+            .text
+            .plain_text()
+    }
+
+    /// Maps a list and its items.
+    fn list(
+        &mut self,
+        list: &asciidoc_parser::blocks::ListBlock<'_>,
+        block: &SourceBlock<'_>,
+    ) -> Vec<Block> {
+        let kind = match list.type_() {
+            SourceListType::Ordered => ListKind::Ordered,
+            SourceListType::Description => ListKind::Description,
+            // A callout list belongs with the callouts it explains, which are
+            // tier 5. Setting it as an ordinary list keeps its text.
+            _ => ListKind::Unordered,
+        };
+
+        let mut items = Vec::new();
+        for child in list.child_blocks() {
+            let SourceBlock::ListItem(source_item) = child else {
+                continue;
+            };
+
+            let mut item = ListItem::new(self.children(source_item.child_blocks()));
+            if let ListItemMarker::DefinedTerm { term, source, .. } = source_item.list_item_marker()
+            {
+                item = item.with_term(self.inline(term.rendered(), location_of(source)));
+            }
+            items.push(item);
+        }
+
+        self.titled(block, Block::List(List::new(kind, items)))
+    }
+
+    /// Maps a block's children.
+    fn children<'a>(&mut self, blocks: impl Iterator<Item = &'a SourceBlock<'a>>) -> Vec<Block> {
+        blocks.flat_map(|child| self.blocks(child)).collect()
+    }
+
+    /// Wraps a mapped block in its title, if the source gave it one.
+    fn titled(&mut self, source: &SourceBlock<'_>, mapped: Block) -> Vec<Block> {
+        match source.title() {
+            Some(title) => {
+                let title = self.inline(title, location_of(source.span()));
+                vec![Block::Titled {
+                    title,
+                    block: Box::new(mapped),
+                }]
+            }
+            None => vec![mapped],
+        }
+    }
+
+    /// Decodes a run of rendered inline content, recording what was skipped.
+    ///
+    /// The location is the enclosing block's. The upstream renderer is handed
+    /// no span for an inline construct — none of its parameter structs carries
+    /// one — so the block is the finest granularity available.
+    fn inline(&mut self, rendered: &str, location: SourceLocation) -> InlineText {
+        self.inline_decoded(decode(rendered), location)
+    }
+
+    /// The same, for a block whose line endings the author chose.
+    ///
+    /// Only a verse asks for this. Everything else is prose, and prose is
+    /// filled.
+    fn inline_keeping_line_breaks(
+        &mut self,
+        rendered: &str,
+        location: SourceLocation,
+    ) -> InlineText {
+        self.inline_decoded(decode_keeping_line_breaks(rendered), location)
+    }
+
+    fn inline_decoded(&mut self, decoded: DecodedInline, location: SourceLocation) -> InlineText {
+        for construct in decoded.unsupported {
+            self.skipped.push(SkippedConstruct {
+                construct,
+                location,
+            });
+        }
+
+        decoded.text
     }
 
     fn skip(&mut self, construct: String, span: Span<'_>) {

@@ -103,3 +103,61 @@ proptest! {
         );
     }
 }
+
+// The same claim one tier out, with inline structure in play.
+//
+// The properties beside `decode` prove no source can put a marker into the
+// stream. This asks the engine whether structure built from that stream stays
+// structure — whether a styled run renders as text under a face, and not as an
+// instruction the source talked the emitter into writing.
+
+use adocpdf_core::document::{InlineNode, InlineStyle};
+
+/// Renders one styled paragraph and returns what the PDF says it contains.
+fn render_styled(style: InlineStyle, text: &str) -> String {
+    let content = InlineText::from_nodes(vec![
+        InlineNode::text("before "),
+        InlineNode::styled(style, vec![InlineNode::text(text)]),
+        InlineNode::text(" after"),
+    ]);
+    let document = Document::new().with_block(Block::Paragraph(Paragraph::new(content)));
+    let plan = plan_document(&document, &ThemeSet::default()).expect("a paragraph plans");
+    let bytes = TypstRenderer::new()
+        .render(&plan, "property.adoc", Date::new(2026, 8, 16).unwrap())
+        .expect("a styled paragraph renders");
+
+    text_of(&bytes)
+}
+
+proptest! {
+    // Six styles times a full layout and PDF export each, so the case count is
+    // lower still than the tier's other property.
+    #![proptest_config(ProptestConfig::with_cases(24))]
+
+    /// Text inside a style is still text: it survives to the page unchanged,
+    /// and the words around it survive with it.
+    #[test]
+    fn styled_text_survives_the_real_rendering_path(text in renderable_text()) {
+        prop_assume!(!text.is_empty());
+
+        for style in [
+            InlineStyle::Strong,
+            InlineStyle::Emphasis,
+            InlineStyle::Monospace,
+            InlineStyle::Highlight,
+        ] {
+            let rendered = render_styled(style, &text);
+            let seen: String = rendered.split_whitespace().collect();
+            let meant: String = text.split_whitespace().collect();
+
+            prop_assert!(
+                seen.contains(&meant),
+                "{style:?} displayed {seen:?}, which does not contain {meant:?}"
+            );
+            prop_assert!(
+                seen.contains("before") && seen.contains("after"),
+                "{style:?} lost the text around it: {seen:?}"
+            );
+        }
+    }
+}

@@ -9,6 +9,15 @@
 # minimised and committed as an ordinary `#[test]`, so a contributor who never
 # installs nightly still runs every bug fuzzing has ever found.
 #
+# One interaction is worth knowing before reading a red run. `libfuzzer-sys`
+# installs a panic hook that aborts *before* unwinding, so the guard that
+# contains `asciidoc-parser`'s panics in the shipped renderer never runs here.
+# This job therefore still reports those panics as crashes, which is the right
+# outcome — the renderer is safe and the upstream defect stays visible — but it
+# means a failure is not automatically new. Check the reproducer against the
+# ones already recorded in `crates/adocpdf-infra/tests/parser_refusal.rs`
+# before treating it as one.
+#
 # `cargo-fuzz` is the one tool in this project with no prebuilt binary from
 # `taiki-e/install-action` — checked against its TOOLS.md — so this job
 # compiles it. It already runs for minutes, so that is affordable here in a way
