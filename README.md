@@ -97,11 +97,11 @@ Run it before considering any change done:
 scripts/ci/gate.sh
 ```
 
-Its seventeen jobs need tools that do not ship with the toolchain:
+Its eighteen jobs need tools that do not ship with the toolchain:
 
 ```bash
 cargo install cargo-llvm-cov cargo-audit cargo-deny cargo-machete \
-              typos-cli taplo-cli cargo-hack zizmor --locked
+              typos-cli taplo-cli cargo-hack zizmor committed --locked
 sudo apt install shellcheck          # or your platform's package manager
 rustup toolchain install 1.92 --profile minimal   # the declared MSRV
 ```

@@ -46,7 +46,7 @@ toolchain:
 ```bash
 cargo install cargo-llvm-cov cargo-audit cargo-deny cargo-machete \
               typos-cli taplo-cli cargo-hack --locked
-cargo install zizmor --locked
+cargo install zizmor committed --locked
 sudo apt install shellcheck          # or your platform's package manager
 rustup toolchain install 1.92 --profile minimal   # the declared MSRV
 ```
@@ -91,19 +91,20 @@ docs: ...    test: ...    refactor: ...    chore: ...
 Explain *why* in the body. The subject says what changed; the body is where a
 future reader finds out what you were weighing.
 
-This is enforced, and it is **the one check that is not in
-`scripts/ci/gate.sh`**. It runs in CI on pull requests, from
-`.github/workflows/commits.yml`. The gate checks the working tree — it can run
-before a commit exists, which is the situation it is normally run in — while a
-commit-message linter checks history, which the gate cannot see. There is no
-local hook either, because `--no-verify` would make it optional.
+This is enforced by the gate's `commit convention` job, which lints every
+commit your branch adds over the default branch. **Wrap the body at 72
+columns** — the limit `committed` applies is subtler than that number
+suggests, and 72 always passes.
 
-Run it yourself before opening a pull request:
+Run the gate *after* committing and before pushing. Run it before, and the job
+sees an empty range and has nothing to say: it is an early warning, not a
+guarantee, and CI is what blocks a merge. To lint one range by hand:
 
 ```bash
-cargo install committed --locked     # install-action does not carry it
-committed <base>..HEAD               # your branch's commits
+committed <base>..HEAD --no-merge-commit
 ```
+
+There is no local hook, because `--no-verify` would make it optional.
 
 The rules are in `committed.toml`. Every value that departs from the tool's
 own defaults is written down there with the reason — notably that `build`,

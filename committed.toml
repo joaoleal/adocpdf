@@ -45,8 +45,16 @@ subject_capitalized = false
 # so 50 was never a rule this project had adopted.
 subject_length = 72
 
-# Merges carry a generated subject that no convention covers, so they are
-# excluded rather than exempted case by case.
+# A merge commit is REFUSED, not exempted — measured against committed 1.1.11,
+# because the name reads like an exemption and is not one. `false` reports
+# "Merge commits are disallowed"; `true` allows one to exist but still holds
+# its generated subject to the convention, which no merge subject meets.
+# Neither value skips one.
+#
+# Refusing is what this repository wants: `main` requires linear history and
+# refuses merge commits, so one reaching a branch is a mistake worth naming.
+# The gate reaches past the merge GitHub synthesises for a pull request rather
+# than relaxing this — see `commit_lint` in scripts/ci/gate.sh.
 merge_commit = false
 
 # Dependabot writes its own subjects. `.github/dependabot.yml` already

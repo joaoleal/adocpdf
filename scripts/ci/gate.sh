@@ -100,6 +100,58 @@ msrv_build() {
     cargo "+${MSRV}" check --workspace --all-targets --quiet
 }
 
+# The commits this branch adds over the branch it will merge into.
+#
+# CI once linted `HEAD~..HEAD^2`, a range that exists only on the merge commit
+# GitHub synthesises for a pull request. Locally the same set is everything
+# reachable from HEAD but not from the default branch, so the base is resolved
+# rather than assumed: `origin/HEAD` is the remote's own statement of which
+# branch that is and survives a rename, `origin/main` covers a remote that
+# never recorded one, and `main` covers a clone with no remote at all.
+#
+# Resolving nothing FAILS. A gate that silently linted no commits would be
+# indistinguishable from one that linted them and found nothing wrong.
+#
+# An empty range does pass — on the default branch, or before the first commit
+# of a branch. That is a check of zero commits rather than a skip: nothing in
+# front of it is left unverified. What it cannot see is a message written
+# after the gate ran, which is why this is an early warning and CI is the
+# enforcement.
+commit_lint() {
+    local base="" ref
+    for ref in \
+        "$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD || true)" \
+        origin/main \
+        main
+    do
+        if [[ -n "$ref" ]] && git rev-parse --verify --quiet "${ref}^{commit}" \
+            >/dev/null; then
+            base="$ref"
+            break
+        fi
+    done
+
+    if [[ -z "$base" ]]; then
+        printf '    no base branch to compare against\n'
+        printf '    tried:  refs/remotes/origin/HEAD, origin/main, main\n'
+        return 1
+    fi
+
+    # On a pull request, GitHub synthesises a merge commit and checks it out
+    # as HEAD, so `<base>..HEAD` would contain it — and `merge_commit = false`
+    # REJECTS a merge commit rather than exempting one. Measured, not assumed:
+    # the first CI run of this job failed on a subject GitHub wrote. The branch
+    # tip is that merge's second parent, which is what `HEAD~..HEAD^2` in the
+    # workflow this job replaced was reaching for. Locally HEAD is not a merge
+    # and this changes nothing.
+    local tip=HEAD
+    if git rev-parse --quiet --verify 'HEAD^2' >/dev/null 2>&1; then
+        tip='HEAD^2'
+    fi
+
+    committed "${base}..${tip}" --no-merge-commit
+}
+
 # --- correctness -------------------------------------------------------------
 
 run_job "formatting"      cargo fmt --all -- --check
@@ -144,6 +196,15 @@ run_tool_job "workflow syntax" actionlint \
 run_tool_job "workflow security" zizmor \
     "cargo install zizmor --locked" \
     zizmor --quiet .github/workflows
+
+# --- history -----------------------------------------------------------------
+
+# Conventional Commits. This was once deliberately outside the gate, on the
+# grounds that the gate reads the working tree while a commit-message linter
+# reads history. The premise held; the conclusion did not. See AGENTS.md.
+run_tool_job "commit convention" committed \
+    "cargo install committed --locked" \
+    commit_lint
 
 # --- dependency hygiene ------------------------------------------------------
 

@@ -48,8 +48,14 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The gate only reads the tree. Leaving the token in .git/config
-          # would expose it to every later step for no benefit.
+          # The whole history, not the default single commit: the gate's
+          # `commit convention` job lints every commit this branch adds over
+          # the default branch, and a shallow clone has neither those commits
+          # nor a `origin/main` to measure them against.
+          fetch-depth: 0
+          # The gate reads the tree and the history, and writes back neither.
+          # Leaving the token in .git/config would expose it to every later
+          # step for no benefit.
           persist-credentials: false
 
       # No toolchain action is used. rust-toolchain.toml already pins the
@@ -120,6 +126,13 @@ jobs:
           # runner image, and a gate must not depend on one.
           install -m755 /tmp/actionlint /usr/local/bin/actionlint
           actionlint --version
+
+      # `committed` is the other tool `taiki-e/install-action` does not carry,
+      # checked against its TOOLS.md, so this job compiles it. That is the
+      # cost of the smaller tool, and it is paid here instead of in the
+      # separate workflow this job replaced.
+      - name: Install committed
+        run: cargo install committed --version 1.1.11 --locked
 
       # One command. Every check, in the order and with the messages a
       # contributor sees locally.
