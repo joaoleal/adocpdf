@@ -164,6 +164,14 @@ what it misses:
   panics cannot be predicted from the source text, so they are contained at the
   parse call and reported as errors. Every reproducer is a permanent test, and
   documents with Windows line endings are unaffected.
+
+  The job does not fail on those two, and the reason is worth knowing:
+  `libfuzzer-sys` aborts before unwinding, so the guard that contains them never
+  runs under the fuzzer. `fuzz/known-crashes.toml` records each one with its
+  reason, `scripts/ci/known-crashes.sh` fails only on a reproducer that is not
+  recorded — matching by exact bytes and printing what it tolerated — and a test
+  on the pinned toolchain asserts every entry is still refused, so an entry
+  cannot outlive the defect it names.
 - **Mutation testing** (`cargo-mutants`, weekly) — breaks the code on purpose
   and checks a test notices. Enforced on the injection boundary, the inline
   decoder and the sandbox rule; reported without a threshold everywhere else.

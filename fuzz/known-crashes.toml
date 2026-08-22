@@ -1,0 +1,36 @@
+# Upstream defects the fuzzer is expected to reach, and why each is tolerated.
+#
+# `libfuzzer-sys` installs a panic hook that calls `abort()` *before* unwinding
+# (`libfuzzer-sys-0.4.13/src/lib.rs:91`-`94`), so the `catch_unwind` that
+# contains these panics in the shipped renderer never runs under the fuzzer.
+# Without this file the weekly job would fail on every run, on defects that are
+# already guarded and already tested — and a permanently red scheduled check is
+# one nobody reads.
+#
+# **An entry names a defect, not an input.** It is matched by the location the
+# panic reports, because the set of inputs reaching one defect is unbounded: a
+# first attempt matched exact bytes, and the very next fuzz run produced a
+# fifty-byte variant of a crash already recorded. Same defect, different bytes,
+# job red forever.
+#
+# Each entry carries a sample input as well. That is not what the job matches
+# on; it is what `crates/adocpdf-infra/tests/known_crashes.rs` feeds to the
+# parse boundary on the pinned stable toolchain, to assert this defect is still
+# refused. An entry cannot outlive the defect it names: when the parser pin
+# moves to a version that fixes one, that test fails and the entry goes.
+#
+# Format: one table per defect, with `location`, `sample` and `reason`. A
+# location matches when the reported panic path *ends with* it, so an entry does
+# not depend on where cargo keeps its registry. Escapes are TOML's own — `\n`,
+# `\t`, `\r`, `\\` and `\uNNNN` — because this really is TOML and the gate's
+# `taplo` job parses it.
+
+[image_macro_with_no_target]
+location = "asciidoc-parser-0.29.19/src/content/macros.rs:291"
+sample = "image:[]\u0002]"
+reason = "The inline image macro's regex makes the target group optional and the replacer indexes it unconditionally, so regex panics with 'no group at index 1'. image:[alt] is enough - a typo, not an adversarial input. Refused by parse_without_letting_a_panic_escape; no source-text rule can predict it, because attribute references are substituted before macros."
+
+[shorthand_attrlist_debug_assertion]
+location = "asciidoc-parser-0.29.19/src/attributes/element_attribute.rs:509"
+sample = "\\i\n[%%%%\t\t%%%f]\r\n[f]"
+reason = "A debug_assert! that merging block-style shorthand produces no warnings. Two consecutive block attribute lines, the first holding a % option shorthand, whitespace and another %, produce one. It fires in a debug build and is compiled out of a release one, so such a document is refused by a debug build and rendered by the shipped binary - nothing here can close that gap."

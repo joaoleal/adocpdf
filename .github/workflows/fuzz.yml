@@ -9,14 +9,22 @@
 # minimised and committed as an ordinary `#[test]`, so a contributor who never
 # installs nightly still runs every bug fuzzing has ever found.
 #
-# One interaction is worth knowing before reading a red run. `libfuzzer-sys`
-# installs a panic hook that aborts *before* unwinding, so the guard that
-# contains `asciidoc-parser`'s panics in the shipped renderer never runs here.
-# This job therefore still reports those panics as crashes, which is the right
-# outcome — the renderer is safe and the upstream defect stays visible — but it
-# means a failure is not automatically new. Check the reproducer against the
-# ones already recorded in `crates/adocpdf-infra/tests/parser_refusal.rs`
-# before treating it as one.
+# One interaction shapes how this job decides. `libfuzzer-sys` installs a panic
+# hook that aborts *before* unwinding, so the guard that contains
+# `asciidoc-parser`'s panics in the shipped renderer never runs here, and the
+# fuzzer still reports those panics as crashes. That is the right outcome — the
+# renderer is safe and the upstream defect stays visible — but on its own it
+# would make this job fail every week on defects that are already guarded and
+# already tested, and a permanently red check is one nobody reads.
+#
+# So the verdict is not libFuzzer's exit status. `fuzz/known-crashes.toml`
+# records each known upstream *defect* — by the location it panics at, not by
+# the bytes that reach it, because the set of inputs reaching one defect is
+# unbounded — and `scripts/ci/known-crashes.sh` fails on any panic that is not
+# recorded, printing the reason for every one it tolerated. The same record is
+# read by a test on the pinned stable toolchain, which asserts each entry's
+# sample input is still refused by the guard, so an entry cannot outlive the
+# defect it names.
 #
 # `cargo-fuzz` is the one tool in this project with no prebuilt binary from
 # `taiki-e/install-action` — checked against its TOOLS.md — so this job
@@ -78,19 +86,38 @@ jobs:
       # syntax would become shell syntax — `zizmor`'s template-injection audit
       # flags exactly this. These two are ours, but the safe form costs nothing
       # and does not have to be re-argued when a value stops being ours.
+      # A non-zero exit here is not the job's verdict: it is how libFuzzer
+      # reports a crash, and the next step decides whether that crash is one
+      # already recorded. It is re-raised when no reproducer was written, which
+      # is what a build failure or a bad flag looks like — those must not be
+      # swallowed.
       - name: Fuzz the target
         env:
           DURATION: ${{ github.event.inputs.duration || '300' }}
           TARGET: ${{ matrix.target }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           cargo +nightly fuzz run "$TARGET" -- \
             -max_total_time="$DURATION" \
-            -print_final_stats=1
+            -print_final_stats=1 2>&1 | tee fuzz-output.log
+          status=${PIPESTATUS[0]}
 
-      # Only reached when the step above failed, which for libFuzzer means it
-      # found a crash. The reproducer is what makes the finding actionable, so
-      # it is kept rather than left in a deleted runner.
+          if [ "$status" -ne 0 ] && \
+             [ -z "$(find fuzz/artifacts -type f -print -quit 2>/dev/null)" ]; then
+            echo "the fuzzer failed without producing a reproducer" >&2
+            exit "$status"
+          fi
+
+      # The job's verdict. Fails on a panic that is not already recorded, and
+      # prints the reason for every one it tolerated. The output is read rather
+      # than the reproducer, because the panic location is what identifies the
+      # defect.
+      - name: Classify the panics
+        run: scripts/ci/known-crashes.sh fuzz-output.log fuzz/artifacts
+
+      # Only reached when a step above failed, which now means the fuzzer found
+      # a crash that is not recorded. The reproducer is what makes the finding
+      # actionable, so it is kept rather than left in a deleted runner.
       - name: Upload the crash reproducers
         if: failure()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
