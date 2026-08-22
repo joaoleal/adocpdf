@@ -21,7 +21,9 @@ pub mod theme;
 pub mod typography;
 
 pub use document::{
-    Block, Document, HeadingLevel, InlineText, InvalidHeadingLevel, Paragraph, Section,
+    Admonition, AdmonitionKind, Block, BreakKind, Container, ContainerKind, Document, HeadingLevel,
+    InlineNode, InlineStyle, InlineText, InvalidHeadingLevel, List, ListItem, ListKind, Paragraph,
+    Quotation, QuotationKind, Section, Verbatim, VerbatimKind,
 };
 pub use geometry::{InvalidPageGeometry, Margins, PageGeometry};
 pub use length::{InvalidLength, Length};
@@ -29,4 +31,7 @@ pub use theme::{
     DEFAULT_FONT_FAMILY, InvalidThemeId, Theme, ThemeId, ThemeSet, ThemeTransition,
     built_in_default_theme,
 };
-pub use typography::{FontFamily, InvalidFontFamily, Typography};
+pub use typography::{
+    Avoidance, DEFAULT_MONOSPACE_FAMILY, FontFamily, InvalidAvoidance, InvalidFontFamily,
+    InvalidLanguageTag, LanguageTag, Typography,
+};

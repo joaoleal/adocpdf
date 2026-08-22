@@ -20,8 +20,8 @@ fn paragraphs(blocks: &[Block]) -> Vec<String> {
     blocks
         .iter()
         .filter_map(|block| match block {
-            Block::Paragraph(paragraph) => Some(paragraph.text().as_str().to_owned()),
-            Block::Section(_) => None,
+            Block::Paragraph(paragraph) => Some(paragraph.text().plain_text()),
+            _ => None,
         })
         .collect()
 }
@@ -31,7 +31,7 @@ fn a_document_title_becomes_the_document_title() {
     let outcome = parse("= The Report\n\nOpening words.\n");
 
     assert_eq!(
-        outcome.document.title().map(|t| t.as_str().to_owned()),
+        outcome.document.title().map(InlineText::plain_text),
         Some("The Report".to_owned())
     );
 }
@@ -61,7 +61,7 @@ fn sections_nest_and_keep_their_levels() {
     let Block::Section(overview) = &outcome.document.body()[0] else {
         panic!("expected a section, got {:?}", outcome.document.body());
     };
-    assert_eq!(overview.heading().as_str(), "Overview");
+    assert_eq!(overview.heading().plain_text(), "Overview");
     assert_eq!(overview.level().get(), 1);
 
     let nested = overview
@@ -69,10 +69,10 @@ fn sections_nest_and_keep_their_levels() {
         .iter()
         .find_map(|block| match block {
             Block::Section(section) => Some(section),
-            Block::Paragraph(_) => None,
+            _ => None,
         })
         .expect("the subsection must nest inside the section");
-    assert_eq!(nested.heading().as_str(), "Details");
+    assert_eq!(nested.heading().plain_text(), "Details");
     assert_eq!(nested.level().get(), 2);
 }
 
@@ -122,16 +122,26 @@ fn a_malformed_theme_name_is_reported_rather_than_passed_on() {
 
 #[test]
 fn an_unsupported_construct_is_skipped_rather_than_fatal() {
-    let outcome = parse("= Title\n\nBefore.\n\n* one\n* two\n\nAfter.\n");
+    // A table, not a list: lists became supported, so the example moved.
+    //
+    // The cells are deliberately absent, and that is the requirement rather
+    // than an accident of the example moving. An unsupported *inline*
+    // construct keeps its text — see `the_text_an_unsupported_construct_carried
+    // _is_kept` — because it sits inside a sentence that would otherwise lose a
+    // phrase. A block does not: `one` and `two` poured into the paragraph
+    // stream would read as prose the author never wrote, in an order they never
+    // chose, with nothing left to say it had been a table.
+    let outcome = parse("= Title\n\nBefore.\n\n|===\n| one | two\n|===\n\nAfter.\n");
 
     assert!(
         !outcome.skipped.is_empty(),
-        "a list is not supported yet and must be reported"
+        "a table is not supported yet and must be reported"
     );
     assert_eq!(
         paragraphs(outcome.document.body()),
         ["Before.", "After."],
-        "the rest of the document must still render"
+        "the rest of the document must still render, and the cells must not be \
+         re-flowed into it"
     );
 }
 
@@ -202,5 +212,172 @@ fn input_that_looks_malformed_still_produces_a_document() {
     assert!(
         outcome.document.title().is_none(),
         "the mangled heading is not a document title"
+    );
+}
+
+// Inline structure, which the adapter used to discard by taking the source
+// span for paragraphs and rendered HTML for headings.
+
+use adocpdf_core::document::{InlineNode, InlineStyle, InlineText};
+
+/// The styles applied anywhere within a run of inline content.
+fn styles_in(text: &InlineText) -> Vec<InlineStyle> {
+    fn walk(nodes: &[InlineNode], found: &mut Vec<InlineStyle>) {
+        for node in nodes {
+            if let InlineNode::Styled { style, children } = node {
+                found.push(*style);
+                walk(children, found);
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(text.nodes(), &mut found);
+    found
+}
+
+#[test]
+fn a_bold_word_in_a_paragraph_becomes_a_styled_span() {
+    let outcome = parse("A bold *word* here.\n");
+    let Block::Paragraph(paragraph) = &outcome.document.body()[0] else {
+        panic!("expected a paragraph");
+    };
+
+    assert_eq!(paragraph.text().plain_text(), "A bold word here.");
+    assert_eq!(styles_in(paragraph.text()), [InlineStyle::Strong]);
+}
+
+#[test]
+fn a_formatted_document_title_carries_its_formatting_and_no_markup() {
+    // The defect this change exists to correct: `doctitle()` returns rendered
+    // output, so with the built-in HTML renderer this title reached the page
+    // as `<strong>Bold</strong> Title`.
+    let outcome = parse("= *Bold* Title\n\nBody.\n");
+    let title = outcome.document.title().expect("the document has a title");
+
+    assert_eq!(title.plain_text(), "Bold Title");
+    assert_eq!(styles_in(title), [InlineStyle::Strong]);
+    assert!(
+        !title.plain_text().contains('<'),
+        "no markup may reach the title, got {:?}",
+        title.plain_text()
+    );
+}
+
+#[test]
+fn a_heading_and_a_paragraph_agree_on_the_same_inline_source() {
+    // The two paths used to disagree: one took the source span, the other took
+    // rendered HTML. Given the same inline source they must now produce the
+    // same structure.
+    let outcome = parse("== A *bold* heading\n\nA *bold* heading\n");
+    let Block::Section(section) = &outcome.document.body()[0] else {
+        panic!("expected a section");
+    };
+    let Block::Paragraph(paragraph) = &section.body()[0] else {
+        panic!("expected a paragraph inside the section");
+    };
+
+    assert_eq!(section.heading().nodes(), paragraph.text().nodes());
+}
+
+#[test]
+fn every_style_survives_the_adapter() {
+    for (source, expected) in [
+        ("*a*", InlineStyle::Strong),
+        ("_a_", InlineStyle::Emphasis),
+        ("`a`", InlineStyle::Monospace),
+        ("^a^", InlineStyle::Superscript),
+        ("~a~", InlineStyle::Subscript),
+        ("#a#", InlineStyle::Highlight),
+    ] {
+        let outcome = parse(&format!("text {source} text\n"));
+        let Block::Paragraph(paragraph) = &outcome.document.body()[0] else {
+            panic!("expected a paragraph for {source}");
+        };
+
+        assert_eq!(styles_in(paragraph.text()), [expected], "for {source}");
+    }
+}
+
+#[test]
+fn an_attribute_reference_resolves_in_body_text() {
+    let outcome = parse(":product: adocpdf\n\nBuilt with {product}.\n");
+
+    assert_eq!(paragraphs(outcome.document.body()), ["Built with adocpdf."]);
+}
+
+#[test]
+fn unsupported_inline_constructs_are_reported_with_their_block() {
+    let outcome = parse(
+        "See https://example.com[the site] and image:x.png[a picture].\n\n\
+         Then a footnote:[note] on the second paragraph.\n",
+    );
+
+    let reported: Vec<&str> = outcome
+        .skipped
+        .iter()
+        .map(|skip| skip.construct.as_str())
+        .collect();
+    assert_eq!(reported, ["link", "inline image", "footnote"]);
+
+    // Each is attributed to the block it sat in, which is the finest
+    // granularity the upstream API allows.
+    assert_eq!(outcome.skipped[0].location.line, 1);
+    assert_eq!(outcome.skipped[1].location.line, 1);
+    assert_eq!(outcome.skipped[2].location.line, 3);
+}
+
+#[test]
+fn no_markup_from_an_unsupported_construct_reaches_the_text() {
+    let outcome = parse(
+        ":experimental:\n\nA https://example.com[link], an image:x.png[image], \
+         a footnote:[note], a kbd:[Ctrl+C] and a <<ref,cross-reference>>.\n",
+    );
+
+    for paragraph in paragraphs(outcome.document.body()) {
+        assert!(
+            !paragraph.contains('<') && !paragraph.contains("href"),
+            "markup reached the page: {paragraph:?}"
+        );
+    }
+}
+
+#[test]
+fn the_text_an_unsupported_construct_carried_is_kept() {
+    let outcome = parse("See https://example.com[the site].\n");
+
+    assert_eq!(paragraphs(outcome.document.body()), ["See the site."]);
+}
+
+#[test]
+fn an_undefined_attribute_reference_is_reported_and_left_as_written() {
+    let outcome = parse("Built with {nowhere-defined}.\n");
+
+    assert_eq!(
+        paragraphs(outcome.document.body()),
+        ["Built with {nowhere-defined}."],
+        "the reference stays as the author wrote it rather than becoming empty text"
+    );
+
+    let reported: Vec<&str> = outcome
+        .skipped
+        .iter()
+        .map(|skip| skip.construct.as_str())
+        .collect();
+    assert_eq!(reported.len(), 1, "expected one report, got {reported:?}");
+    assert!(
+        reported[0].contains("nowhere-defined"),
+        "the report must name the attribute, got {reported:?}"
+    );
+}
+
+#[test]
+fn a_defined_attribute_is_substituted_and_not_reported() {
+    let outcome = parse(":product: adocpdf\n\nBuilt with {product}.\n");
+
+    assert_eq!(paragraphs(outcome.document.body()), ["Built with adocpdf."]);
+    assert!(
+        outcome.skipped.is_empty(),
+        "a resolved reference is not a skipped construct, got {:?}",
+        outcome.skipped
     );
 }

@@ -18,6 +18,7 @@ pub mod clock;
 pub mod dto;
 pub mod emitter;
 pub mod fonts;
+pub mod inline;
 pub mod markup;
 pub mod parser;
 pub mod path_resolver;

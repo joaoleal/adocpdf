@@ -2,9 +2,12 @@
 
 Renders AsciiDoc to PDF, in Rust, with Typst embedded as the layout engine.
 
-This is a **walking skeleton**: the thinnest path that touches every layer and
-produces a real PDF. It exists to prove the architecture before more is built on
-it, so read the limitations below before expecting it to render your documents.
+It renders inline formatting, the common block constructs and lists, and it
+lays text out with an optimal line breaker rather than a greedy one. Most of
+the AsciiDoc language is still ahead of it, though —
+[`docs/asciidoc-support.md`](docs/asciidoc-support.md) says exactly which parts,
+construct by construct, and that file is checked by a test rather than
+maintained by hope.
 
 ## What works today
 
@@ -12,19 +15,38 @@ it, so read the limitations below before expecting it to render your documents.
 adocpdf book.adoc book.pdf
 ```
 
-- Document title, section headings (nested), paragraphs, inline text.
+- Document title, section headings (nested), paragraphs.
+- **Inline formatting**: bold, italic, monospace, superscript, subscript and
+  highlight, nested to any depth, plus curved quotes, em dashes, ellipses,
+  arrows and the other character replacements. Attribute references resolve;
+  an undefined one is reported rather than silently emptied.
+- **Blocks**: literal, listing, source and fenced code blocks set verbatim in a
+  monospace face; all five admonitions in both their forms; quotes and verses
+  with attribution; examples, sidebars and open blocks, nested; thematic and
+  page breaks; block titles; comments.
+- **Lists**: unordered, ordered and description lists, nested, with
+  continuation.
 - Per-section themes: a section can declare `[theme=wide]` or
   `[theme=large-print]` and the section plus everything nested inside it renders
   under that theme.
 - A theme that changes **page geometry** starts a new page; one that changes
   only **typography** does not. That distinction is deliberate and tested.
+- **Optimal line breaking.** Paragraphs are broken by optimising the paragraph
+  as a whole rather than by filling each line in turn, whether or not the text
+  is justified. Widow and orphan avoidance is on. Source wrapping does not reach
+  the page: hard-wrap your `.adoc` however you like and the same prose comes out
+  the same, because a newline inside a paragraph is the editor's and not the
+  author's. A `+` marker and a verse block still break where they say.
 - Reproducible output: `--date YYYY-MM-DD` makes the same source produce
   byte-identical bytes on every run and every machine.
 - Everything read or written is confined to a project root, judged by where a
   path *resolves* — traversal, absolute paths and outward symlinks are all
   refused alike.
-- Unsupported constructs are skipped and reported, never silently dropped and
-  never fatal.
+- Unsupported constructs are skipped and reported by name and source location,
+  never silently dropped and never fatal. An unsupported *inline* construct
+  still puts its text on the page, so a sentence never loses a phrase; an
+  unsupported *block* is reported rather than re-flowed into the text around
+  it.
 
 ```
 adocpdf <INPUT> <OUTPUT> [--project-root DIR] [--date YYYY-MM-DD]
@@ -32,21 +54,29 @@ adocpdf <INPUT> <OUTPUT> [--project-root DIR] [--date YYYY-MM-DD]
 
 ## What does not work yet
 
-Honest list. None of these are bugs; they are scope this change deliberately
-excluded.
+**[`docs/asciidoc-support.md`](docs/asciidoc-support.md) is the list**, one row
+per construct the AsciiDoc language defines, saying whether this renderer
+honours it, and which later change will. It is not prose that drifts: the rows
+are read by a test that renders each sample and checks the claim, so a row
+cannot say "honoured" without the renderer honouring it.
 
+The headline gaps, all scheduled there:
+
+- **Tables, cross-references, footnote bodies, images and includes.** The
+  parser hands all of them over fully structured; rendering them is scheduled
+  work, not a parsing problem.
 - **No incremental rendering.** The whole document is recompiled every time.
   Whether partial *PDF* regeneration is achievable at all — as opposed to SVG
-  preview of visible pages — is still an open question.
-- **Most of AsciiDoc.** Tables, lists, includes, admonitions, cross-references,
-  images, callouts and attribute substitution are all skipped with a report.
-- **No inline formatting.** `*bold*` and `_italic_` render as literal text.
-  Paragraph text is taken from the source span, because the upstream parser's
-  rendered output is HTML and this renderer does not produce HTML.
+  preview of visible pages — is still an open question, and optimal line
+  breaking makes it harder, since a change to one word can reflow a whole
+  paragraph.
 - **No theme file.** Themes are the built-in `wide` and `large-print` plus a
   default. Designing an authoring format is its own piece of work.
 - **No WASM build.** `adocpdf-wasm` compiles but is empty. Whether the Typst
   dependency tree builds for `wasm32-wasip1` is untested.
+
+Two things are recorded there as never coming: audio and video blocks, and
+docinfo. A page cannot play sound, and there is no HTML head to inject into.
 
 ## Building
 
@@ -119,17 +149,24 @@ what it misses:
 - **Property tests** (`proptest`) — part of the ordinary suite, so they run in
   the gate. The two security-relevant rules are stated as properties rather
   than examples: everything reaching the output through
-  `markup::string_literal` survives a round trip, and a path is judged by where
-  it resolves rather than how it is spelled. Counterexamples are saved to
-  `proptest-regressions/` and committed.
+  `markup::string_literal` survives a round trip, no source text can produce a
+  structural marker, and a path is judged by where it resolves rather than how
+  it is spelled. Counterexamples are saved to `proptest-regressions/` and
+  committed.
 - **Fuzzing** (`cargo-fuzz`, weekly, **needs nightly**) — throws arbitrary
-  bytes at the parse → plan → emit path looking for a panic or a hang. It has
-  already found one: `asciidoc-parser` 0.29.19 does not terminate on a document
-  containing only a vertical tab or form feed. That is guarded against, and the
-  reproducer is a permanent test.
+  bytes at the parse → plan → emit path looking for a panic or a hang. Every
+  defect it has found so far has been in `asciidoc-parser` 0.29.19 rather than
+  here: three non-terminating inputs — a vertical tab or form feed, and a
+  carriage return followed by whitespace that is not a line feed, both of which
+  hang even on a document with real content — and two panics, one of them an
+  inline `image:` or `icon:` macro written with no target, which an author
+  reaches by forgetting a filename. The hangs are refused before parsing; the
+  panics cannot be predicted from the source text, so they are contained at the
+  parse call and reported as errors. Every reproducer is a permanent test, and
+  documents with Windows line endings are unaffected.
 - **Mutation testing** (`cargo-mutants`, weekly) — breaks the code on purpose
-  and checks a test notices. Enforced on the injection boundary and the sandbox
-  rule; reported without a threshold everywhere else.
+  and checks a test notices. Enforced on the injection boundary, the inline
+  decoder and the sandbox rule; reported without a threshold everywhere else.
 
 Neither fuzzing nor mutation testing is part of `scripts/ci/gate.sh`, and a
 green gate does not claim otherwise. Both take far longer than a merge should

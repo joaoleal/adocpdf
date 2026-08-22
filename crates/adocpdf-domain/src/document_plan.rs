@@ -6,7 +6,10 @@
 //! as page-breaking or not. An adapter consuming it needs no notion of scope,
 //! inheritance, or precedence.
 
-use adocpdf_core::document::{Block, Document, HeadingLevel, InlineText, Section};
+use adocpdf_core::document::{
+    AdmonitionKind, Block, BreakKind, ContainerKind, Document, HeadingLevel, InlineText, ListKind,
+    QuotationKind, Section, Verbatim,
+};
 use adocpdf_core::theme::{Theme, ThemeSet, ThemeTransition};
 
 use crate::error::DomainError;
@@ -25,12 +28,61 @@ pub enum PlanItem {
     },
     /// A paragraph of body text.
     Paragraph(InlineText),
+    /// Content preserved exactly as written.
+    Verbatim(Verbatim),
+    /// A break in the flow of the document.
+    Break(BreakKind),
+    /// A title belonging to the item that follows it.
+    BlockTitle(InlineText),
+    /// A group of items, set according to what kind of group it is.
+    ///
+    /// The plan is otherwise flat, and stays flat wherever it can: theme
+    /// resolution needs no notion of scope, and flattening is what frees an
+    /// adapter from having to model one. Groups are the exception because a
+    /// list, an admonition and a sidebar genuinely contain other blocks, and
+    /// an adapter given a depth number instead would have to reconstruct the
+    /// nesting to emit it — with nothing to catch a depth sequence that made
+    /// no sense.
+    Group {
+        /// What kind of group it is.
+        kind: GroupKind,
+        /// What it contains, already planned.
+        children: Vec<Self>,
+    },
     /// Everything after this point is set under a different theme.
     ThemeChange {
         /// The theme now in effect.
         theme: Theme,
         /// What kind of change it is, and so whether a page break follows.
         transition: ThemeTransition,
+    },
+}
+
+/// What a [`PlanItem::Group`] is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GroupKind {
+    /// A labelled passage set apart from the text.
+    Admonition(AdmonitionKind),
+    /// A quotation, with whatever attribution the source supplied.
+    Quotation {
+        /// Whether it is prose or verse.
+        kind: QuotationKind,
+        /// Who is being quoted.
+        attribution: Option<InlineText>,
+        /// The work being quoted from.
+        citation: Option<InlineText>,
+    },
+    /// A container holding other blocks.
+    Container(ContainerKind),
+    /// A list. Its children are its items, each of them an
+    /// [`GroupKind::ListItem`] group.
+    List(ListKind),
+    /// One item of a list.
+    ListItem {
+        /// The term this item describes, for a description list.
+        term: Option<InlineText>,
+        /// Which item this is, counting from one, for an ordered list.
+        position: usize,
     },
 }
 
@@ -134,14 +186,78 @@ impl Planner {
 
     fn walk(&mut self, blocks: &[Block], themes: &ThemeSet) -> Result<(), DomainError> {
         for block in blocks {
-            match block {
-                Block::Paragraph(paragraph) => {
-                    self.push(PlanItem::Paragraph(paragraph.text().clone()));
+            self.walk_block(block, themes)?;
+        }
+        Ok(())
+    }
+
+    fn walk_block(&mut self, block: &Block, themes: &ThemeSet) -> Result<(), DomainError> {
+        match block {
+            Block::Paragraph(paragraph) => {
+                self.push(PlanItem::Paragraph(paragraph.text().clone()));
+            }
+            Block::Section(section) => self.walk_section(section, themes)?,
+            Block::Verbatim(verbatim) => self.push(PlanItem::Verbatim(verbatim.clone())),
+            Block::Break(kind) => self.push(PlanItem::Break(*kind)),
+            Block::Titled { title, block } => {
+                self.push(PlanItem::BlockTitle(title.clone()));
+                self.walk_block(block, themes)?;
+            }
+            Block::Admonition(admonition) => {
+                let children = self.group(admonition.body(), themes)?;
+                self.push(PlanItem::Group {
+                    kind: GroupKind::Admonition(admonition.kind()),
+                    children,
+                });
+            }
+            Block::Quotation(quotation) => {
+                let children = self.group(quotation.body(), themes)?;
+                self.push(PlanItem::Group {
+                    kind: GroupKind::Quotation {
+                        kind: quotation.kind(),
+                        attribution: quotation.attribution().cloned(),
+                        citation: quotation.citation().cloned(),
+                    },
+                    children,
+                });
+            }
+            Block::Container(container) => {
+                let children = self.group(container.body(), themes)?;
+                self.push(PlanItem::Group {
+                    kind: GroupKind::Container(container.kind()),
+                    children,
+                });
+            }
+            Block::List(list) => {
+                let mut items = Vec::new();
+                for (index, item) in list.items().iter().enumerate() {
+                    let children = self.group(item.body(), themes)?;
+                    items.push(PlanItem::Group {
+                        kind: GroupKind::ListItem {
+                            term: item.term().cloned(),
+                            position: index + 1,
+                        },
+                        children,
+                    });
                 }
-                Block::Section(section) => self.walk_section(section, themes)?,
+                self.push(PlanItem::Group {
+                    kind: GroupKind::List(list.kind()),
+                    children: items,
+                });
             }
         }
         Ok(())
+    }
+
+    /// Plans a group's content into its own sequence.
+    ///
+    /// A theme change is committed before the group is entered, not inside it:
+    /// only a section can change the theme, and a section cannot be nested in
+    /// a group, so a group's content is always set under one theme.
+    fn group(&mut self, blocks: &[Block], themes: &ThemeSet) -> Result<Vec<PlanItem>, DomainError> {
+        let outer = std::mem::take(&mut self.items);
+        self.walk(blocks, themes)?;
+        Ok(std::mem::replace(&mut self.items, outer))
     }
 
     fn walk_section(&mut self, section: &Section, themes: &ThemeSet) -> Result<(), DomainError> {

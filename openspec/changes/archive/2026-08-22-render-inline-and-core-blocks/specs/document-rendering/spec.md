@@ -1,51 +1,5 @@
-# document-rendering Specification
+## MODIFIED Requirements
 
-## Purpose
-
-Turning an AsciiDoc source document into a PDF file: what is read, what is
-produced, which document constructs are honoured, how failures are reported,
-and the guarantee that the same input always yields the same bytes.
-
-## Requirements
-
-### Requirement: Render an AsciiDoc file to a PDF file
-
-The system SHALL accept a path to an AsciiDoc source file and a path for a PDF
-output file, and SHALL produce a readable PDF document at the output path whose
-content derives from the source.
-
-The output SHALL be a well-formed PDF that a conforming reader can open. The
-system SHALL NOT create or modify the output file when rendering fails; a failed
-render leaves any pre-existing file at that path untouched.
-
-#### Scenario: A minimal document renders
-
-- **WHEN** the source contains a document title and one paragraph
-- **THEN** a PDF file is created at the output path
-- **AND** it contains at least one page
-- **AND** the title and the paragraph text are both present in the rendered text
-
-#### Scenario: The source file does not exist
-
-- **WHEN** the input path names a file that is not present
-- **THEN** rendering fails with an error identifying the missing input path
-- **AND** no file is created at the output path
-
-#### Scenario: Malformed source still produces a document
-
-- **WHEN** the source contains malformed AsciiDoc — an unterminated block, a
-  stray delimiter, or text matching no construct at all
-- **THEN** rendering does not fail on that account
-- **AND** a PDF is created containing whatever the source could be understood to
-  mean
-- **AND** anything that could not be represented is reported as skipped
-
-#### Scenario: The output path cannot be written
-
-- **WHEN** the output path is not writable
-- **THEN** rendering fails with an error identifying the output path
-- **AND** the failure is distinguishable from a failure to read the input and
-  from a failure to lay the document out
 ### Requirement: Supported document constructs
 
 The system SHALL publish an inventory of the AsciiDoc language's constructs
@@ -71,22 +25,11 @@ construct is honoured, because the answer differs by construct — a footnote's
 body is prose, while a table's cells re-flowed into the paragraph stream would
 read as text the author never wrote, in an order they never chose.
 
-Section headings SHALL be visually distinguishable from one another at every
-level the renderer honours, not only at the first two. A reader who cannot tell
-one level from another cannot recover the document's structure from the page,
-which is the whole purpose of setting headings differently from body text.
-
 #### Scenario: Nested sections keep their level
 
 - **WHEN** the source contains a section and a subsection beneath it
 - **THEN** both headings appear in the output
 - **AND** they are visually distinguished from each other and from body text
-
-#### Scenario: Deeper heading levels are told apart
-
-- **WHEN** a document contains headings at every level the renderer honours
-- **THEN** no two levels are set identically
-- **AND** each level is distinguishable from body text
 
 #### Scenario: An unsupported construct is skipped, not fatal
 
@@ -122,26 +65,7 @@ which is the whole purpose of setting headings differently from body text.
 - **THEN** the render succeeds and the construct is reported as skipped
 - **AND** the inventory records it as never to be supported, rather than as
   scheduled work
-### Requirement: Rendering is deterministic
 
-Rendering the same source with the same configuration SHALL produce
-byte-identical PDF output, regardless of when it runs, on which machine, under
-which locale, or in which order internal collections happen to be traversed.
-
-Any date embedded in the output SHALL come from a caller-supplied value rather
-than from the host clock.
-
-#### Scenario: Repeated renders match byte for byte
-
-- **WHEN** the same source is rendered twice with the same configuration
-- **THEN** the two output files are byte-identical
-
-#### Scenario: The embedded date is supplied, not observed
-
-- **WHEN** a document that displays the current date is rendered twice with the
-  same supplied date but at different wall-clock times
-- **THEN** both outputs show the supplied date
-- **AND** the two output files are byte-identical
 ### Requirement: Source content cannot alter rendering instructions
 
 Text drawn from the source document SHALL be treated as content only. No
@@ -183,6 +107,25 @@ document structure.
   encoding of structure
 - **THEN** it renders as literal text
 - **AND** the document's layout is unchanged by its presence
+
+## REMOVED Requirements
+
+### Requirement: Rendering terminates on every input
+
+**Reason**: Replaced by *Rendering terminates or refuses, on every input*. The
+requirement itself still holds, but one of its scenarios — "The same character
+inside real content is not refused" — now asserts the opposite of what the
+system does, and a scenario cannot be quietly reversed inside a modification.
+Fuzzing found inputs where a vertical tab or form feed beside real content
+hangs the parser, so that allowance could not be kept.
+
+**Migration**: None for callers. A document containing a vertical tab or a form
+feed is now refused with a clear error rather than rendered; no such document
+rendered *reliably* before, since whether it hung depended on where the
+character sat.
+
+## ADDED Requirements
+
 ### Requirement: Rendering terminates or refuses, on every input
 
 The system SHALL return a result for every input it is given, whether that

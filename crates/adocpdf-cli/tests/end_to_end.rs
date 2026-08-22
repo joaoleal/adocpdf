@@ -306,12 +306,19 @@ fn an_unreadable_date_is_a_usage_error() {
 
 #[test]
 fn a_skipped_construct_is_reported_on_standard_error() {
+    // A table: still unsupported, and scheduled for tier 3 in
+    // `docs/asciidoc-support.md`. This test used to use a list, which this
+    // change made supported — so the example moved rather than the assertion.
     let workspace = Workspace::with("supported.adoc");
-    let with_list = workspace.input("with-list.adoc");
-    fs::write(&with_list, "= Title\n\nBefore.\n\n* one\n* two\n\nAfter.\n").unwrap();
+    let with_table = workspace.input("with-table.adoc");
+    fs::write(
+        &with_table,
+        "= Title\n\nBefore.\n\n|===\n| one | two\n|===\n\nAfter.\n",
+    )
+    .unwrap();
 
     let output = run(
-        &[&with_list, &workspace.output("out.pdf")],
+        &[&with_table, &workspace.output("out.pdf")],
         &["--date", FIXED_DATE],
     );
 
