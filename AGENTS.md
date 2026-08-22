@@ -122,18 +122,18 @@ containment rule lives in `adocpdf-domain::sandbox`; resolution is the
 scripts/ci/gate.sh
 ```
 
-Seventeen jobs: formatting, lints, tests, the architecture guard, the WASM
+Eighteen jobs: formatting, lints, tests, the architecture guard, the WASM
 build, docs, MSRV, shell, TOML, spelling, feature combinations, workflow syntax,
-workflow security, advisories, licences, unused dependencies, and coverage. A
-green typecheck is not a passing test suite. Run it before considering a change
-done.
+workflow security, commit convention, advisories, licences, unused
+dependencies, and coverage. A green typecheck is not a passing test suite. Run
+it before considering a change done.
 
 Requires `~/.cargo/bin` on `PATH`, plus the tools that do not ship with the
 toolchain:
 
 ```bash
 cargo install cargo-llvm-cov cargo-audit cargo-deny cargo-machete \
-              typos-cli taplo-cli cargo-hack zizmor --locked
+              typos-cli taplo-cli cargo-hack zizmor committed --locked
 sudo apt install shellcheck
 rustup toolchain install 1.92 --profile minimal
 ```
@@ -187,29 +187,56 @@ testing is enforced on three files only — the injection boundary, the inline
 decoder and the sandbox rule — with the rest of the workspace reported as
 information and no threshold applied.
 
-### The one check that is not in the gate
+### Commit messages, and a decision this project reversed
 
-Commit messages. `committed` enforces Conventional Commits, and it runs in CI
-on pull requests — `.github/workflows/commits.yml` — not in
-`scripts/ci/gate.sh`.
+`committed` enforces Conventional Commits, and it is the gate's `commit
+convention` job. It lints every commit the current branch adds over the
+default branch, resolving that branch from `origin/HEAD`, then `origin/main`,
+then `main`, and failing rather than passing if none of the three resolves.
 
-The reason is not oversight. The gate checks the **working tree**: it can run
-on uncommitted changes, and all seventeen of its jobs make sense before a
-commit exists. A commit-message linter checks **history**, which the gate has
-no view of. Putting it there would add a job that is meaningless in the
-situation the gate is normally run in. A local hook was rejected too —
-`--no-verify` exists, so a check the author can skip is documentation.
+It was not always there, and the reasoning that kept it out is worth keeping
+on the page.
 
-Before opening a pull request:
+**What was decided.** The gate checks the **working tree**: it can run on
+uncommitted changes, and every one of its jobs made sense before a commit
+existed. A commit-message linter checks **history**, which the gate had no
+view of. A job that is meaningless in the situation the gate is normally run
+in did not belong in it, so the check lived in its own workflow.
+
+**Why that was reversed.** The premise was right and the conclusion was not.
+Running the gate before any commit exists gives the job an empty commit
+range, and an empty range is a *check of zero commits*, not a skip — nothing
+in front of it is left unverified. That is the distinction this gate cares
+about: it objects to a check that quietly skips because such a check reports
+success on a machine that verified nothing, which is not what happens here.
+
+The cost of the old arrangement was paid in full on pull request #4. The gate
+went green — all seventeen jobs, 505 tests, 95.52% line coverage — while the
+separate workflow failed on a commit body wrapped at 77 characters. Nothing a
+contributor could run locally would have said so. Worse, that workflow was
+never a required status check: `quality gate` is the only one, so the rule
+this file mandates could not actually block a merge. Folding the check into
+the gate made it blocking without touching branch protection.
+
+**What this still does not close.** A gate run *before* you write a commit
+cannot see the message you write after it. The gate is an early warning, run
+again after committing and before pushing; CI is the enforcement.
+
+**What was not reversed.** A local hook is still rejected — `--no-verify`
+exists, so a check the author can skip is documentation. The gate is not a
+hook: nothing wires it into `git commit`, and it has no bypass flag.
+
+To lint one range by hand:
 
 ```bash
-committed HEAD~..HEAD^2 --no-merge-commit   # what CI runs, on a PR
-committed <base>..HEAD                      # equivalent, on a local branch
+committed <base>..HEAD --no-merge-commit
 ```
 
 `cargo install committed --locked` — `taiki-e/install-action` does not carry
 it. Its rules live in `committed.toml`, and each departure from the tool's
-defaults is recorded there with a reason.
+defaults is recorded there with a reason. Wrap a body at 72 columns: the
+limit `committed` applies is subtler than the number suggests, and 72 always
+passes.
 
 `CHANGELOG.md` is generated from that history by `git-cliff`, configured in
 `cliff.toml`. It is regenerated **when a release is cut**, not per commit: a
