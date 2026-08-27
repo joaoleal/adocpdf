@@ -16,18 +16,19 @@
 
 mod cli;
 mod exit;
+mod presenter;
 
 use std::process::ExitCode;
 
+use adocpdf_adapters::dto::{from_domain_report, to_domain_request};
+use adocpdf_asciidoc::parser::AsciidocParser;
 use adocpdf_domain::ports::{Clock, Date};
-use adocpdf_domain::render_document::{RenderDocument, RenderReport};
-use adocpdf_infra::clock::{FixedClock, SystemClock};
-use adocpdf_infra::dto::to_domain_request;
-use adocpdf_infra::parser::AsciidocParser;
-use adocpdf_infra::path_resolver::FilesystemPathResolver;
-use adocpdf_infra::renderer::TypstRenderer;
-use adocpdf_infra::source_store::FilesystemSourceStore;
-use adocpdf_infra::themes::BuiltInThemes;
+use adocpdf_domain::render_document::RenderDocument;
+use adocpdf_host::clock::{FixedClock, SystemClock};
+use adocpdf_host::path_resolver::FilesystemPathResolver;
+use adocpdf_host::source_store::FilesystemSourceStore;
+use adocpdf_typst::renderer::TypstRenderer;
+use adocpdf_typst::themes::BuiltInThemes;
 use clap::Parser as _;
 
 use crate::cli::Cli;
@@ -62,40 +63,15 @@ fn main() -> ExitCode {
 
     match use_case.execute(&to_domain_request(&cli.to_request())) {
         Ok(report) => {
-            report_success(&report);
+            // The use case's result crosses the boundary before it is spoken
+            // aloud: `main` converts, and the presenter sees only the DTO.
+            presenter::report_success(&from_domain_report(&report));
             ExitCode::SUCCESS
         }
         Err(error) => {
             eprintln!("adocpdf: {error}");
             ExitCode::from(code_for(&error))
         }
-    }
-}
-
-/// Prints what was produced, and anything that was left out.
-///
-/// Skipped constructs go to standard error rather than standard output: they
-/// are a warning about incomplete output, and they must be visible even when
-/// the success line is redirected somewhere.
-fn report_success(report: &RenderReport) {
-    println!(
-        "wrote {} ({} bytes)",
-        report.output.display(),
-        report.bytes_written
-    );
-
-    for skipped in &report.skipped {
-        eprintln!(
-            "adocpdf: skipped {} at {}",
-            skipped.construct, skipped.location
-        );
-    }
-
-    if !report.is_complete() {
-        eprintln!(
-            "adocpdf: {} construct(s) were not rendered",
-            report.skipped.len()
-        );
     }
 }
 

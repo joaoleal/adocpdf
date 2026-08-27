@@ -97,7 +97,7 @@ fn a_dependency_pointing_outward_is_rejected() {
 
     let violations = check_crate(
         "adocpdf-domain",
-        &["adocpdf-core".to_owned(), "adocpdf-infra".to_owned()],
+        &["adocpdf-core".to_owned(), "adocpdf-typst".to_owned()],
         &rule,
     );
 
@@ -105,7 +105,7 @@ fn a_dependency_pointing_outward_is_rejected() {
         violations,
         vec![Violation::OutwardDependency {
             crate_name: "adocpdf-domain".to_owned(),
-            dependency: "adocpdf-infra".to_owned(),
+            dependency: "adocpdf-typst".to_owned(),
         }],
         "depending on an outer layer must be reported, and the inward edge must not be"
     );

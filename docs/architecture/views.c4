@@ -1,0 +1,181 @@
+// What the model is worth looking at through.
+
+views {
+
+  // C4 level 1.
+  view index {
+    title 'Level 1 — System context'
+    description 'Who uses adocpdf, and which outside things it touches. No internal detail.'
+
+    include
+      author,
+      adocpdf,
+      filesystem,
+      asciidoc,
+      typst,
+      clap,
+      wasmHost
+
+    style wasmHost {
+      opacity 20%
+    }
+
+    autoLayout TopBottom
+  }
+
+  // C4 level 2. A crate is this system's unit of containment: separately
+  // compiled, separately depended on, and the thing the architecture guard
+  // reasons about.
+  view layers of adocpdf {
+    title 'Level 2 — Containers (crates), and the dependency rule'
+    description '''
+      The nine crates, the sixteen dependencies their manifests declare
+      (solid), the one declared for tests alone (dashed), and the five more
+      architecture.toml permits that nothing has taken up (dotted).
+      Dependencies flow strictly inward: a crate must never appear in the
+      allowed set of a crate it depends on, and nothing may depend on a
+      delivery crate.
+    '''
+
+    include *
+
+    style adocpdf.wasm {
+      opacity 20%
+    }
+
+    autoLayout BottomTop
+  }
+
+  // Which of Clean Architecture's four rings each crate sits in. Colour is the
+  // ring, and every crate now carries exactly one.
+  view rings of adocpdf {
+    title 'The four rings, as this workspace realises them'
+    description '''
+      Entities innermost, then use cases, interface adapters, and frameworks and
+      drivers outermost. Source dependencies point inward only; control reaches
+      outward at runtime through the ports the domain owns. Each of the three
+      outermost crates is named for the one technology it is permitted to
+      name — which is what makes the ring boundary something the guard fails a
+      build over, rather than a convention held by review.
+    '''
+
+    include *
+
+    style element.tag = #entities {
+      color green
+    }
+    style element.tag = #use-cases {
+      color indigo
+    }
+    style element.tag = #interface-adapters {
+      color amber
+    }
+    style element.tag = #frameworks {
+      color slate
+    }
+
+    autoLayout BottomTop
+  }
+
+  // C4 level 3.
+  view domain of adocpdf.domain {
+    title 'Level 3 — Components of adocpdf-domain'
+    description '''
+      Six ports the domain owns, and the one use case that orchestrates them.
+      Nothing here names a technology.
+    '''
+
+    include *
+    include adocpdf.host.* -> adocpdf.domain.*
+    include adocpdf.asciidocLayer.* -> adocpdf.domain.*
+    include adocpdf.typstLayer.* -> adocpdf.domain.*
+
+    autoLayout LeftRight
+  }
+
+  // C4 level 3.
+  view typst of adocpdf.typstLayer {
+    title 'Level 3 — Components of adocpdf-typst'
+    description '''
+      Two adapters and the modules behind them. Source text reaches the output
+      through markup::string_literal and nothing else — the two elements tagged
+      injection-boundary are where that is enforced, and they are in one crate
+      because they are one boundary. BuiltInThemes is here rather than in the
+      adapter ring because loading a theme checks its font families against the
+      embedded book.
+    '''
+
+    include *
+    include typst
+    include adocpdf.typstLayer.* -> adocpdf.domain.*
+
+    autoLayout LeftRight
+  }
+
+  // C4 level 3.
+  view asciidoc of adocpdf.asciidocLayer {
+    title 'Level 3 — Components of adocpdf-asciidoc'
+    description '''
+      The parser adapter and the inline recovery it depends on. Upstream
+      exposes no inline syntax tree, so structure crosses as characters in a
+      string; the two predicates deciding which characters may be forged are
+      defined once, in inline, and imported by the adapter.
+    '''
+
+    include *
+    include asciidoc
+    include adocpdf.asciidocLayer.* -> adocpdf.domain.*
+    include adocpdf.asciidocLayer.* -> adocpdf.adapters.*
+
+    autoLayout LeftRight
+  }
+
+  // C4 level 3.
+  view host of adocpdf.host {
+    title 'Level 3 — Components of adocpdf-host'
+    description '''
+      The three adapters whose technology is the operating system. This is the
+      only crate that names std::fs, which makes "no filesystem call happens
+      outside the sandbox" a claim about one small crate.
+    '''
+
+    include *
+    include filesystem
+    include adocpdf.host.* -> adocpdf.domain.*
+    include adocpdf.host.* -> adocpdf.adapters.*
+
+    autoLayout LeftRight
+  }
+
+  dynamic view render {
+    title 'Rendering a document'
+    description '''
+      One run of `adocpdf`. The order is load bearing: paths are confined
+      before they are touched, and the output is written last, so a failed
+      render leaves no output file.
+    '''
+
+    author -> adocpdf.cli.command 'adocpdf <input> <output> --date YYYY-MM-DD'
+    adocpdf.cli.command -> adocpdf.domain.renderDocument 'executes'
+
+    adocpdf.domain.renderDocument -> adocpdf.domain.resolverPort 'confines root, input and output'
+    adocpdf.domain.renderDocument -> adocpdf.domain.clockPort 'asks for today'
+    adocpdf.domain.renderDocument -> adocpdf.domain.sourceStorePort 'reads source, writes PDF last'
+    adocpdf.domain.renderDocument -> adocpdf.domain.parserPort 'parses source'
+    adocpdf.domain.renderDocument -> adocpdf.domain.themeRepositoryPort 'loads themes'
+    adocpdf.domain.renderDocument -> adocpdf.domain.plan 'plans the document'
+    adocpdf.domain.renderDocument -> adocpdf.domain.rendererPort 'renders the plan'
+    adocpdf.cli.command -> adocpdf.cli.presenter 'prints what was written, and what was skipped'
+
+    // The crate boundaries the steps cross, kept as faint context. Including an
+    // ancestor is fine; addressing a step to one is not, because LikeC4's
+    // sequence layout refuses a participant that contains another participant.
+    // That is why the first step names `cli.command` and not `cli`.
+    include adocpdf, adocpdf.cli, adocpdf.domain
+
+    style adocpdf {
+      color muted
+      opacity 0%
+    }
+  }
+}

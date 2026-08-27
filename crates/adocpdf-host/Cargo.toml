@@ -1,0 +1,15 @@
+[package]
+name = "adocpdf-host"
+description = "Frameworks ring: the host adapters. The only crate that touches the filesystem or the wall clock."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+adocpdf-adapters = { path = "../adocpdf-adapters", version = "0.1.0" }
+adocpdf-domain = { path = "../adocpdf-domain", version = "0.1.0" }
+
+[lints]
+workspace = true

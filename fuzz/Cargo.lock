@@ -9,6 +9,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "adocpdf-adapters"
+version = "0.1.0"
+dependencies = [
+ "adocpdf-domain",
+ "adocpdf-shared",
+]
+
+[[package]]
+name = "adocpdf-asciidoc"
+version = "0.1.0"
+dependencies = [
+ "adocpdf-adapters",
+ "adocpdf-core",
+ "adocpdf-domain",
+ "asciidoc-parser",
+]
+
+[[package]]
 name = "adocpdf-core"
 version = "0.1.0"
 
@@ -24,28 +42,27 @@ dependencies = [
 name = "adocpdf-fuzz"
 version = "0.0.0"
 dependencies = [
+ "adocpdf-asciidoc",
  "adocpdf-core",
  "adocpdf-domain",
- "adocpdf-infra",
+ "adocpdf-typst",
  "libfuzzer-sys",
-]
-
-[[package]]
-name = "adocpdf-infra"
-version = "0.1.0"
-dependencies = [
- "adocpdf-core",
- "adocpdf-domain",
- "adocpdf-shared",
- "asciidoc-parser",
- "typst",
- "typst-layout",
- "typst-pdf",
 ]
 
 [[package]]
 name = "adocpdf-shared"
 version = "0.1.0"
+
+[[package]]
+name = "adocpdf-typst"
+version = "0.1.0"
+dependencies = [
+ "adocpdf-core",
+ "adocpdf-domain",
+ "typst",
+ "typst-layout",
+ "typst-pdf",
+]
 
 [[package]]
 name = "aho-corasick"

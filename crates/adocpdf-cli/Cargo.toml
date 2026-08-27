@@ -1,6 +1,6 @@
 [package]
 name = "adocpdf-cli"
-description = "Command-line delivery. A composition root: constructs adapters and injects them."
+description = "Frameworks ring: command-line delivery. A composition root that constructs adapters and injects them."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,13 +12,23 @@ name = "adocpdf"
 path = "src/main.rs"
 
 [dependencies]
+adocpdf-adapters = { path = "../adocpdf-adapters", version = "0.1.0" }
+adocpdf-asciidoc = { path = "../adocpdf-asciidoc", version = "0.1.0" }
 adocpdf-domain = { path = "../adocpdf-domain", version = "0.1.0" }
+adocpdf-host = { path = "../adocpdf-host", version = "0.1.0" }
 adocpdf-shared = { path = "../adocpdf-shared", version = "0.1.0" }
-adocpdf-infra = { path = "../adocpdf-infra", version = "0.1.0" }
+adocpdf-typst = { path = "../adocpdf-typst", version = "0.1.0" }
 clap.workspace = true
 
 [dev-dependencies]
+# Test-only: the moved layout tests assert on the document model the parser
+# built, which `src/` never names.
+adocpdf-core = { path = "../adocpdf-core", version = "0.1.0" }
 pdf-extract.workspace = true
+# The layout tests read the frames Typst produced, so they name the engine's
+# own geometry types. Test-only: nothing under `src/` names Typst.
+typst.workspace = true
+typst-layout.workspace = true
 
 [lints]
 workspace = true

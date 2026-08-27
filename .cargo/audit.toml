@@ -21,7 +21,7 @@ ignore = [
     #
     # The dependency path is:
     #
-    #     adocpdf-infra -> typst -> typst-library -> hayagriva
+    #     adocpdf-typst -> typst -> typst-library -> hayagriva
     #                   -> citationberg -> quick-xml 0.38.4
     #
     # Both advisories are fixed in quick-xml 0.41.0. `citationberg 0.7.0`
@@ -42,7 +42,7 @@ ignore = [
     #      v instructions.
     #   2. Document content is emitted as string literals, so a document
     #      cannot invoke a citation function either. See
-    #      `adocpdf-infra::markup`.
+    #      `adocpdf-typst::markup`.
     #   3. `World::file` refuses every file id except the main document, so no
     #      `.csl` or `.bib` could be loaded even if a citation were somehow
     #      invoked. Proven by `world::tests::an_unknown_file_is_refused`.

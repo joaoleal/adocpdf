@@ -1,0 +1,20 @@
+[package]
+name = "adocpdf-asciidoc"
+description = "Frameworks ring: the AsciiDoc adapter. The only crate that names the AsciiDoc parser."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+adocpdf-adapters = { path = "../adocpdf-adapters", version = "0.1.0" }
+adocpdf-core = { path = "../adocpdf-core", version = "0.1.0" }
+adocpdf-domain = { path = "../adocpdf-domain", version = "0.1.0" }
+asciidoc-parser.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

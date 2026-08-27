@@ -83,7 +83,7 @@ where one applies:
 
 ```
 feat(domain): resolve section themes through the layout plan
-fix(infra): reject a symlink whose target resolves outside the root
+fix(host): reject a symlink whose target resolves outside the root
 build: pin every GitHub Action to a commit SHA
 docs: ...    test: ...    refactor: ...    chore: ...
 ```
@@ -123,16 +123,27 @@ Commit freely.
 Clean Architecture with a strict inward dependency rule, enforced by a
 checked-in guard reading `architecture.toml`:
 
-| Crate | May depend on |
-|---|---|
-| `adocpdf-core` | nothing (std only) |
-| `adocpdf-domain` | core |
-| `adocpdf-shared` | core |
-| `adocpdf-infra` | core, domain, shared |
-| `adocpdf-cli` / `adocpdf-wasm` | core, domain, shared, infra |
+| Crate | Ring | May depend on |
+|---|---|---|
+| `adocpdf-core` | entities | nothing (std only) |
+| `adocpdf-domain` | use cases | core |
+| `adocpdf-shared` | interface adapters | core |
+| `adocpdf-adapters` | interface adapters | domain, shared |
+| `adocpdf-asciidoc` | frameworks | core, domain, adapters |
+| `adocpdf-typst` | frameworks | core, domain |
+| `adocpdf-host` | frameworks | domain, adapters |
+| `adocpdf-cli` | frameworks (delivery) | core, domain, shared, adapters, asciidoc, host, typst |
+| `adocpdf-wasm` | frameworks (delivery) | core, domain, shared, typst |
+
+Each external technology is confined to one crate in production code:
+`asciidoc-parser` to `adocpdf-asciidoc`, Typst to `adocpdf-typst`.
+`adocpdf-cli` is additionally permitted `typst` and `typst-layout` for the
+layout tests, which read the engine's own frames; nothing under its `src/` names
+them.
 
 `architecture.toml` governs `[dependencies]` and `[dev-dependencies]` alike: a
-test that reaches outward breaks the layering just as a library does.
+test that reaches outward breaks the layering just as a library does — which is
+also why that one permission is real rather than test-only.
 
 Two rules are easy to break and worth repeating:
 

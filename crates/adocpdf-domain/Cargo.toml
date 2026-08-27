@@ -1,6 +1,6 @@
 [package]
 name = "adocpdf-domain"
-description = "Entities, value objects, ports and use cases. Names no external technology."
+description = "Use-case ring: entities, value objects, ports and use cases. Names no external technology."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

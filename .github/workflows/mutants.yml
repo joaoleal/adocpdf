@@ -59,8 +59,8 @@ jobs:
       - name: Mutate the injection boundary, the inline decoder and the sandbox rule
         run: |
           cargo mutants --no-shuffle \
-            --file crates/adocpdf-infra/src/markup.rs \
-            --file crates/adocpdf-infra/src/inline.rs \
+            --file crates/adocpdf-typst/src/markup.rs \
+            --file crates/adocpdf-asciidoc/src/inline.rs \
             --file crates/adocpdf-domain/src/sandbox.rs
 
       - name: Upload the enforced-file report

@@ -34,9 +34,10 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+adocpdf-asciidoc = { path = "../crates/adocpdf-asciidoc" }
 adocpdf-core = { path = "../crates/adocpdf-core" }
 adocpdf-domain = { path = "../crates/adocpdf-domain" }
-adocpdf-infra = { path = "../crates/adocpdf-infra" }
+adocpdf-typst = { path = "../crates/adocpdf-typst" }
 
 [[bin]]
 name = "parse_plan_emit"

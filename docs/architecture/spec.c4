@@ -1,0 +1,117 @@
+// The vocabulary the model is written in.
+//
+// Element kinds mirror the words this codebase already uses for itself.
+// AGENTS.md speaks of layers, ports and adapters, so the model does too rather
+// than translating them into generic C4 nouns.
+
+specification {
+
+  element actor {
+    style {
+      shape person
+      color secondary
+    }
+  }
+
+  element system {
+    style {
+      shape rectangle
+    }
+  }
+
+  // A crate under `crates/`, subject to the inward dependency rule stated in
+  // `architecture.toml` and enforced by `xtask/tests/architecture.rs`.
+  element layer {
+    style {
+      shape rectangle
+      color primary
+    }
+  }
+
+  // A trait the domain owns and an adapter implements.
+  element port {
+    style {
+      shape rectangle
+      color green
+    }
+  }
+
+  // An implementation of a port. Each lives in the outer ring, in the crate
+  // named for the technology it uses.
+  element adapter {
+    style {
+      shape component
+      color amber
+    }
+  }
+
+  // An application service: the orchestration a delivery crate calls.
+  element usecase {
+    style {
+      shape rectangle
+      color indigo
+    }
+  }
+
+  // A module inside a crate that is neither a port nor an adapter.
+  element module {
+    style {
+      shape rectangle
+      color muted
+    }
+  }
+
+  // A third-party crate or a host facility. `architecture.toml` names, per
+  // crate, which of these may be reached — so each engine is confined to one
+  // crate rather than to a layer.
+  element external {
+    style {
+      shape rectangle
+      color slate
+    }
+  }
+
+  // Carries no behaviour yet, and exists so the architecture guard constrains
+  // it from the first commit rather than retroactively.
+  tag stub
+
+  // Source text crosses into engine markup here. See AGENTS.md, "Content is
+  // never markup".
+  tag injection-boundary
+
+  // Load bearing for byte-identical output.
+  tag determinism
+
+  // Which of Clean Architecture's four rings a crate belongs to. Every crate
+  // now carries exactly one.
+  tag entities
+  tag use-cases
+  tag interface-adapters
+  tag frameworks
+
+  relationship implements {
+    color green
+    line dashed
+  }
+
+  // A dependency a manifest under `crates/` declares in `[dependencies]`.
+  relationship depends {
+    color muted
+  }
+
+  // A dependency declared only in `[dev-dependencies]`. Drawn apart because
+  // the difference is invisible to the guard and load bearing to the reader:
+  // `architecture.toml` folds both into one list, so a test-only edge is
+  // permitted for production too, and nothing would report it if taken up.
+  relationship test {
+    color amber
+    line dashed
+  }
+
+  // A dependency `architecture.toml` permits and no manifest declares. That
+  // file sets a ceiling; this is the headroom under it.
+  relationship permitted {
+    color muted
+    line dotted
+  }
+}

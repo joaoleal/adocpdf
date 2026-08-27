@@ -14,7 +14,7 @@
 # job red forever.
 #
 # Each entry carries a sample input as well. That is not what the job matches
-# on; it is what `crates/adocpdf-infra/tests/known_crashes.rs` feeds to the
+# on; it is what `crates/adocpdf-asciidoc/tests/known_crashes.rs` feeds to the
 # parse boundary on the pinned stable toolchain, to assert this defect is still
 # refused. An entry cannot outlive the defect it names: when the parser pin
 # moves to a version that fixes one, that test fails and the entry goes.

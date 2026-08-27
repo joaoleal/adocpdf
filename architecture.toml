@@ -10,9 +10,9 @@
 #               Dependencies flow strictly inward; a crate must never appear in
 #               the allowed set of a crate it depends on, and no crate may
 #               depend on a delivery crate.
-# `external`  — which third-party crates it may depend on. This is what keeps
-#               the layout engine and the AsciiDoc parser confined to the
-#               infrastructure layer.
+# `external`  — which third-party crates it may depend on. This is what confines
+#               each external technology to one crate: the layout engine to
+#               `adocpdf-typst`, the AsciiDoc parser to `adocpdf-asciidoc`.
 #
 # WHAT THIS FILE DOES NOT COVER: `fuzz/`.
 #
@@ -23,8 +23,9 @@
 # `deny.toml`.
 #
 # That is acceptable because the fuzz crate is not a layer. It depends inward
-# on `adocpdf-core`, `adocpdf-domain` and `adocpdf-infra` to reach the pure
-# parse -> plan -> emit path, it is never shipped, and nothing depends on it.
+# on `adocpdf-core`, `adocpdf-domain`, `adocpdf-asciidoc` and `adocpdf-typst` to
+# reach the pure parse -> plan -> emit path, it is never shipped, and nothing
+# depends on it.
 # If it ever gained a dependency on a delivery crate, or if anything in
 # `crates/` came to depend on it, that would be a real violation this guard
 # would not catch — so it is recorded here rather than left to be discovered.
@@ -50,31 +51,49 @@ external = [ "thiserror", "proptest" ]
 workspace = [ "adocpdf-core" ]
 external = [  ]
 
-[crates.adocpdf-infra]
-workspace = [ "adocpdf-core", "adocpdf-domain", "adocpdf-shared" ]
+[crates.adocpdf-adapters]
+workspace = [ "adocpdf-domain", "adocpdf-shared" ]
+external = [  ]
+
+[crates.adocpdf-asciidoc]
+workspace = [ "adocpdf-core", "adocpdf-domain", "adocpdf-adapters" ]
+# `proptest` is test-only, as in `adocpdf-domain` above: the inline decoder's
+# marker range is a structure-forgery boundary, and a boundary that only holds
+# for the examples in a test file is not a boundary.
+external = [ "asciidoc-parser", "proptest" ]
+
+[crates.adocpdf-typst]
+workspace = [ "adocpdf-core", "adocpdf-domain" ]
 # `proptest` is test-only, as in `adocpdf-domain` above: the escaping in
 # `markup::string_literal` is an injection boundary, and a boundary that only
 # holds for the examples in a test file is not a boundary.
 # `pdf-extract` is test-only, as in `adocpdf-cli`: the Tier 2 injection
 # property renders a literal and reads the text back out of the finished PDF,
 # because only the engine can prove what the engine displays.
-external = [
-    "typst",
-    "typst-layout",
-    "typst-pdf",
-    "asciidoc-parser",
-    "thiserror",
-    "proptest",
-    "pdf-extract",
-]
+external = [ "typst", "typst-layout", "typst-pdf", "thiserror", "proptest", "pdf-extract" ]
+
+[crates.adocpdf-host]
+workspace = [ "adocpdf-domain", "adocpdf-adapters" ]
+external = [  ]
 
 [crates.adocpdf-cli]
-workspace = [ "adocpdf-core", "adocpdf-domain", "adocpdf-shared", "adocpdf-infra" ]
+workspace = [
+    "adocpdf-core",
+    "adocpdf-domain",
+    "adocpdf-shared",
+    "adocpdf-adapters",
+    "adocpdf-asciidoc",
+    "adocpdf-host",
+    "adocpdf-typst",
+]
 # `pdf-extract` is test-only: the end-to-end tests read back the PDF they
 # produced, so what they assert on is the artefact rather than a buffer this
 # code already held.
-external = [ "clap", "thiserror", "pdf-extract" ]
+# `typst` and `typst-layout` are test-only: the layout tests live here because
+# they parse *and* typeset, which no single engine crate may do, and they read
+# the frames the engine produced. Nothing under `src/` names either.
+external = [ "clap", "thiserror", "pdf-extract", "typst", "typst-layout" ]
 
 [crates.adocpdf-wasm]
-workspace = [ "adocpdf-core", "adocpdf-domain", "adocpdf-shared", "adocpdf-infra" ]
+workspace = [ "adocpdf-core", "adocpdf-domain", "adocpdf-shared", "adocpdf-typst" ]
 external = [  ]

@@ -18,14 +18,39 @@ dependencies = [
 ]
 
 [[package]]
-name = "adocpdf-cli"
+name = "adocpdf-adapters"
 version = "0.1.0"
 dependencies = [
  "adocpdf-domain",
- "adocpdf-infra",
  "adocpdf-shared",
+]
+
+[[package]]
+name = "adocpdf-asciidoc"
+version = "0.1.0"
+dependencies = [
+ "adocpdf-adapters",
+ "adocpdf-core",
+ "adocpdf-domain",
+ "asciidoc-parser",
+ "proptest",
+]
+
+[[package]]
+name = "adocpdf-cli"
+version = "0.1.0"
+dependencies = [
+ "adocpdf-adapters",
+ "adocpdf-asciidoc",
+ "adocpdf-core",
+ "adocpdf-domain",
+ "adocpdf-host",
+ "adocpdf-shared",
+ "adocpdf-typst",
  "clap",
  "pdf-extract",
+ "typst",
+ "typst-layout",
 ]
 
 [[package]]
@@ -42,23 +67,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "adocpdf-infra"
+name = "adocpdf-host"
+version = "0.1.0"
+dependencies = [
+ "adocpdf-adapters",
+ "adocpdf-domain",
+]
+
+[[package]]
+name = "adocpdf-shared"
+version = "0.1.0"
+
+[[package]]
+name = "adocpdf-typst"
 version = "0.1.0"
 dependencies = [
  "adocpdf-core",
  "adocpdf-domain",
- "adocpdf-shared",
- "asciidoc-parser",
  "pdf-extract",
  "proptest",
  "typst",
  "typst-layout",
  "typst-pdf",
 ]
-
-[[package]]
-name = "adocpdf-shared"
-version = "0.1.0"
 
 [[package]]
 name = "adocpdf-wasm"

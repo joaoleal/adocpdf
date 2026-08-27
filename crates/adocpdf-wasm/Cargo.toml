@@ -1,6 +1,6 @@
 [package]
 name = "adocpdf-wasm"
-description = "WASM/WASI delivery. A placeholder in this change, present so the guard constrains it from the start."
+description = "Frameworks ring: WASM/WASI delivery. Still a placeholder, present so the guard constrains it from the start."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
