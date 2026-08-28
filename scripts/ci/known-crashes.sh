@@ -23,7 +23,7 @@
 #   3. Every tolerated panic is printed with the reason from its entry, so a
 #      green run still says what it found.
 #
-# The record is also read by `crates/adocpdf-infra/tests/known_crashes.rs`,
+# The record is also read by `crates/adocpdf-asciidoc/tests/known_crashes.rs`,
 # which asserts on the pinned stable toolchain that each entry's sample input is
 # still refused by the guard. That is what stops an entry outliving the defect
 # it names.

@@ -1,0 +1,19 @@
+schema: spec-driven
+created: 2026-08-27
+
+# No capability changes. Nothing a user can observe moves: the same document
+# with the same `--date` renders to the same PDF bytes, the binary prints the
+# same lines to the same streams, and every exit code is the one it was before.
+# What changes is which crate a module compiles into, and which technology
+# `architecture.toml` permits where.
+#
+# The one behaviour worth checking twice is the CLI's report, because it stops
+# being formatted from the domain type and starts being formatted from the
+# boundary DTO. That is a rewrite of the formatting code, not of what it
+# formats, and it is held to byte-identical output by a characterisation test —
+# see design D1, which also records that the existing end-to-end tests are too
+# loose to catch a wording change on their own.
+#
+# Restating a requirement because the code behind it moved would make the spec
+# a log of refactoring activity rather than a description of behaviour.
+skip_specs: true

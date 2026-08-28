@@ -1,0 +1,395 @@
+// The repository, as it is.
+//
+// Crate dependencies are read from the manifests under `crates/`; the headroom
+// `architecture.toml` leaves above them is drawn separately, as `permitted`.
+// Everything else here — ports, adapters, the order a render happens in — comes
+// from the source. When the model and the code disagree, the code is right.
+
+model {
+
+  author = actor 'Document author' {
+    description 'Writes AsciiDoc and wants a PDF that renders identically everywhere.'
+  }
+
+  filesystem = external 'Project filesystem' {
+    description '''
+      The files under the project root. Everything read or written is judged by
+      where the path resolves, not how it is spelled, so nothing outside the
+      root is reachable.
+    '''
+  }
+
+  asciidoc = external 'asciidoc-parser' {
+    technology 'Rust crate, pinned in Cargo.toml'
+    description 'Parses AsciiDoc source. Confined to adocpdf-asciidoc.'
+  }
+
+  typst = external 'typst, typst-layout, typst-pdf' {
+    technology 'Rust crates'
+    description '''
+      Typesets a document and produces PDF bytes. Confined to adocpdf-typst in
+      production; the layout tests in adocpdf-cli read engine frames, so the
+      guard permits it there too.
+    '''
+  }
+
+  clap = external 'clap' {
+    technology 'Rust crate'
+    description 'Parses the command line. Confined to adocpdf-cli.'
+  }
+
+  wasmHost = external 'WASM/WASI host' {
+    #stub
+    description 'A future embedder of the WASM delivery surface. Nothing calls it yet.'
+  }
+
+  adocpdf = system 'adocpdf' {
+    description '''
+      Renders AsciiDoc to PDF. Clean Architecture with a strict inward
+      dependency rule; identical inputs produce byte-identical output.
+    '''
+
+    // ---------------------------------------------------------------- core --
+
+    core = layer 'adocpdf-core' {
+      #entities
+      technology 'Rust crate, std only'
+      description '''
+        The document and theme model. Zero dependencies, so its errors carry
+        hand-written Display and Error impls rather than using thiserror.
+      '''
+
+      document = module 'document, presentation' {
+        description 'Blocks, sections, headings, inline text, and how they present.'
+      }
+      theme = module 'theme' {
+        description 'Themes and theme sets, including the built-in default.'
+      }
+      typography = module 'typography, geometry, length' {
+        description 'Page geometry and type scale, as validated value objects.'
+      }
+    }
+
+    // -------------------------------------------------------------- domain --
+
+    domain = layer 'adocpdf-domain' {
+      #use-cases
+      technology 'Rust crate'
+      description '''
+        Entities, value objects, ports and use cases. Names neither Typst, nor
+        the AsciiDoc parser, nor the filesystem, nor any delivery mechanism.
+      '''
+
+      renderDocument = usecase 'RenderDocument' {
+        description '''
+          The order of operations is the point: every path is confined before it
+          is touched, the source is parsed before any theme work, and the output
+          is written last — which is what makes "a failed render leaves no
+          output file" true by construction.
+        '''
+      }
+
+      plan = module 'document_plan' {
+        description '''
+          Resolves themes across a document and flattens it into a LayoutPlan.
+          A section theme applies to everything nested inside it, unless a
+          nested section declares its own.
+        '''
+      }
+
+      sandbox = module 'sandbox' {
+        description '''
+          ProjectRoot and SandboxedPath. Holding a SandboxedPath is the evidence
+          that confinement was checked, so an unchecked path cannot reach an I/O
+          call by being forgotten about.
+        '''
+      }
+
+      clockPort = port 'Clock' {
+        #determinism
+        description 'Supplies the date a render should use. A render that reads the wall clock is not reproducible.'
+      }
+      sourceStorePort = port 'SourceStore' {
+        description 'Reads and writes files inside the sandbox. Every method takes a SandboxedPath.'
+      }
+      parserPort = port 'DocumentParser' {
+        description 'Turns AsciiDoc source into the document model, reporting what it skipped.'
+      }
+      themeRepositoryPort = port 'ThemeRepository' {
+        description 'Supplies the themes a document may use.'
+      }
+      rendererPort = port 'DocumentRenderer' {
+        description '''
+          Lays a planned document out and produces PDF bytes. Receives a
+          LayoutPlan rather than a document and a theme set, because deciding
+          which theme applies where is a business rule already settled.
+        '''
+      }
+      resolverPort = port 'PathResolver' {
+        description 'Resolves a path to the location it really refers to, following links and eliminating . and ..'
+      }
+
+      renderDocument -> resolverPort 'confines root, input and output'
+      renderDocument -> clockPort 'asks for today'
+      renderDocument -> sourceStorePort 'reads source, writes PDF last'
+      renderDocument -> parserPort 'parses source'
+      renderDocument -> themeRepositoryPort 'loads themes'
+      renderDocument -> plan 'plans the document'
+      renderDocument -> rendererPort 'renders the plan'
+      renderDocument -> sandbox 'proves confinement'
+    }
+
+    // -------------------------------------------------------------- shared --
+
+    shared = layer 'adocpdf-shared' {
+      #interface-adapters
+      technology 'Rust crate'
+      description '''
+        Boundary DTOs only, free of business rules. Plain data that validates
+        nothing and decides nothing, which is what lets the WASM surface stay
+        small.
+      '''
+
+      renderDto = module 'render' {
+        description 'What a caller sends across the boundary, and what comes back.'
+      }
+    }
+
+    // ------------------------------------------------------------ adapters --
+
+    adapters = layer 'adocpdf-adapters' {
+      #interface-adapters
+      technology 'Rust crate'
+      description '''
+        Translation, and nothing else. Its allow-list in architecture.toml is
+        empty, so "the adapter ring names no engine" is a checked fact rather
+        than an intention.
+      '''
+
+      dto = module 'dto' {
+        description 'Translates between the boundary shapes and the domain types — the innermost place that can see both.'
+      }
+
+      calendar = module 'calendar' {
+        #determinism
+        description '''
+          Civil dates to Unix day counts and back. Policy, not host: it belongs
+          inward of the clock that reads the machine, and both engines get the
+          same answer for what day it is because there is one implementation.
+        '''
+      }
+    }
+
+    // ---------------------------------------------------------------- host --
+
+    host = layer 'adocpdf-host' {
+      #frameworks
+      technology 'Rust crate'
+      description 'The three adapters whose technology is the operating system. The only crate that names std::fs.'
+
+      systemClock = adapter 'SystemClock, FixedClock' {
+        #determinism
+        description 'The host date, and a fixed date for tests and reproducible builds.'
+      }
+
+      filesystemStore = adapter 'FilesystemSourceStore' {
+        description 'Reads and writes real files, accepting only SandboxedPath.'
+      }
+
+      filesystemResolver = adapter 'FilesystemPathResolver' {
+        description 'Resolves against the real filesystem, including paths whose final components do not exist yet.'
+      }
+    }
+
+    // ------------------------------------------------------------- asciidoc --
+
+    asciidocLayer = layer 'adocpdf-asciidoc' {
+      #frameworks
+      technology 'Rust crate'
+      description 'The only crate permitted to name asciidoc-parser.'
+
+      asciidocAdapter = adapter 'AsciidocParser' {
+        description '''
+          Wraps asciidoc-parser, maps its warnings to SkippedConstruct, refuses
+          input that could forge structure, and contains a panic rather than
+          letting it escape.
+        '''
+      }
+
+      inline = module 'inline' {
+        description '''
+          Gets inline structure out of the parser and back into the model.
+          Upstream exposes no inline syntax tree, so structure crosses as
+          characters in a string — and both range predicates that decide what
+          may be forged are defined here, once, and imported by the adapter.
+        '''
+      }
+    }
+
+    // ---------------------------------------------------------------- typst --
+
+    typstLayer = layer 'adocpdf-typst' {
+      #frameworks
+      technology 'Rust crate'
+      description '''
+        The only crate permitted to name Typst — which puts the injection
+        boundary and the engine behind one wall.
+      '''
+
+      typstRenderer = adapter 'TypstRenderer' {
+        description 'Lays the plan out with Typst and produces PDF bytes.'
+      }
+
+      builtInThemes = adapter 'BuiltInThemes' {
+        description '''
+          Supplies the themes compiled into the binary. Behind the engine wall
+          because loading a theme rejects a font family the embedded font book
+          does not carry — a check only this side can make.
+        '''
+      }
+
+      emitter = module 'emitter' {
+        #injection-boundary
+        description 'Turns a layout plan into engine markup. Structural instructions are built only from validated model values.'
+      }
+
+      markup = module 'markup' {
+        #injection-boundary
+        description '''
+          The single point where source text becomes engine markup. Everything
+          derived from an AsciiDoc source reaches the output through
+          string_literal and nothing else.
+        '''
+      }
+
+      world = module 'world' {
+        description 'The inversion of control Typst supplies for itself. Belongs here and must never leak inward.'
+      }
+
+      fonts = module 'fonts' {
+        #determinism
+        description 'Fonts embedded in the binary rather than read from the host, so output does not vary by machine.'
+      }
+
+      typstRenderer -> emitter 'emits markup for the plan'
+      emitter -> markup 'passes all source text through'
+      typstRenderer -> world 'supplies the engine its world'
+      typstRenderer -> fonts 'embeds the font set'
+      world -> fonts 'serves embedded fonts'
+      builtInThemes -> fonts 'checks every family against the embedded book'
+    }
+
+    // ------------------------------------------------------------ delivery --
+
+    cli = layer 'adocpdf-cli' {
+      #frameworks
+      technology 'Rust binary'
+      description 'A composition root. Parses arguments, wires adapters to ports, maps errors to exit codes. No business logic.'
+
+      command = module 'cli, exit' {
+        description 'The argument surface and the exit-code mapping.'
+      }
+
+      presenter = module 'presenter' {
+        description '''
+          Formats RenderReportDto for a terminal. It reads the boundary shape
+          and never the domain result, which is what stops a result reaching
+          the terminal without crossing the boundary built for it.
+        '''
+      }
+    }
+
+    wasm = layer 'adocpdf-wasm' {
+      #stub
+      #frameworks
+      technology 'Rust cdylib'
+      description '''
+        The WASM/WASI delivery surface. Deliberately empty: it exists so the
+        architecture guard constrains it from the first commit rather than
+        having the rules applied retroactively.
+      '''
+    }
+
+    // ----------------------------------------------- the dependency rule ----
+    //
+    // `depends` is what a manifest declares in `[dependencies]`: the graph that
+    // exists. `test` is declared only for tests. `permitted` is what
+    // `architecture.toml` allows and no manifest has taken up — the headroom
+    // the rule leaves. Dependencies flow strictly inward in every case.
+
+    domain -[depends]-> core
+
+    adapters -[depends]-> domain
+    adapters -[depends]-> shared
+
+    host -[depends]-> domain
+    host -[depends]-> adapters
+
+    asciidocLayer -[depends]-> core
+    asciidocLayer -[depends]-> domain
+    asciidocLayer -[depends]-> adapters
+
+    typstLayer -[depends]-> core
+    typstLayer -[depends]-> domain
+
+    cli -[depends]-> domain
+    cli -[depends]-> shared
+    cli -[depends]-> adapters
+    cli -[depends]-> host
+    cli -[depends]-> asciidocLayer
+    cli -[depends]-> typstLayer
+
+    // Test-only. The layout tests assert on the document model the parser
+    // built, which nothing under `crates/adocpdf-cli/src/` names.
+    cli -[test]-> core
+
+    // Permitted, undeclared. `adocpdf-shared` needs nothing from core yet, and
+    // `adocpdf-wasm` declares nothing at all — which is what a deliberate stub
+    // looks like in a manifest.
+    shared -[permitted]-> core
+    wasm -[permitted]-> core
+    wasm -[permitted]-> domain
+    wasm -[permitted]-> shared
+    wasm -[permitted]-> typstLayer
+  }
+
+  // ------------------------------------------------ ports and their impls --
+
+  adocpdf.host.systemClock -[implements]-> adocpdf.domain.clockPort
+  adocpdf.host.filesystemStore -[implements]-> adocpdf.domain.sourceStorePort
+  adocpdf.host.filesystemResolver -[implements]-> adocpdf.domain.resolverPort
+  adocpdf.asciidocLayer.asciidocAdapter -[implements]-> adocpdf.domain.parserPort
+  adocpdf.typstLayer.builtInThemes -[implements]-> adocpdf.domain.themeRepositoryPort
+  adocpdf.typstLayer.typstRenderer -[implements]-> adocpdf.domain.rendererPort
+
+  adocpdf.adapters.dto -> adocpdf.shared.renderDto 'maps to and from'
+  adocpdf.cli.presenter -> adocpdf.shared.renderDto 'formats'
+  adocpdf.asciidocLayer.asciidocAdapter -> adocpdf.adapters.calendar 'converts the date to a timestamp'
+  adocpdf.host.systemClock -> adocpdf.adapters.calendar 'converts the timestamp to a date'
+  adocpdf.asciidocLayer.asciidocAdapter -> adocpdf.asciidocLayer.inline 'recovers inline structure'
+
+  // --------------------------------------------------- the outside world --
+
+  // The command surface rather than the crate, so the `render` sequence has no
+  // participant containing another. See the note in views.c4.
+  author -> adocpdf.cli.command 'adocpdf <input> <output> [--project-root DIR] [--date YYYY-MM-DD]'
+  wasmHost -> adocpdf.wasm 'will call'
+
+  adocpdf.cli.command -> adocpdf.domain.renderDocument 'executes'
+  adocpdf.cli.command -> adocpdf.cli.presenter 'hands the report to'
+  adocpdf.cli -> clap 'parses the command line with'
+
+  adocpdf.asciidocLayer.asciidocAdapter -> asciidoc 'parses with'
+  adocpdf.asciidocLayer.inline -> asciidoc 'renders inline content with'
+  adocpdf.typstLayer.typstRenderer -> typst 'typesets and writes PDF with'
+  adocpdf.typstLayer.world -> typst 'satisfies the engine World trait for'
+  adocpdf.typstLayer.fonts -> typst 'builds the engine font book for'
+  adocpdf.host.filesystemStore -> filesystem 'reads and writes'
+  adocpdf.host.filesystemResolver -> filesystem 'resolves against'
+
+  // The exception worth drawing rather than hiding: the moved layout tests read
+  // engine frames, so the composition root names Typst in `[dev-dependencies]`.
+  // `architecture.toml` folds dev-dependencies into the same list, so this is a
+  // real permission — production use here would not be reported.
+  adocpdf.cli -[test]-> typst 'reads laid-out frames in tests'
+}

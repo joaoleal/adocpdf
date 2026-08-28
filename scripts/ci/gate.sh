@@ -29,6 +29,7 @@ readonly WASM_CLEAN_CRATES=(
     adocpdf-core
     adocpdf-domain
     adocpdf-shared
+    adocpdf-adapters
     adocpdf-wasm
 )
 

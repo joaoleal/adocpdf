@@ -18,7 +18,7 @@ Four boundaries. Each is tested, and each is documented in `AGENTS.md` or
 ### 1. Source content must never become a rendering instruction
 
 Everything derived from an AsciiDoc source reaches the output through
-`markup::string_literal` in `crates/adocpdf-infra/src/markup.rs`, which emits it
+`markup::string_literal` in `crates/adocpdf-typst/src/markup.rs`, which emits it
 as a Typst string literal in code mode rather than as markup. The escaping
 surface is therefore the quote, the backslash and control characters — a fixed
 set — rather than the whole markup grammar.

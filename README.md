@@ -203,13 +203,17 @@ them and the condition that should end it; every other advisory still fails.
 
 ```
 AsciiDoc source
-  → asciidoc-parser (infra)      parse, in the most restrictive safe mode
-  → document model  (core)       title, sections, paragraphs
-  → layout plan     (domain)     themes resolved, page breaks classified
-  → Typst markup    (infra)      all content emitted as string literals
-  → embedded Typst  (infra)      compiled in-process, from an in-memory World
+  → asciidoc-parser (asciidoc)  parse, in the most restrictive safe mode
+  → document model  (core)      title, sections, paragraphs
+  → layout plan     (domain)    themes resolved, page breaks classified
+  → Typst markup    (typst)     all content emitted as string literals
+  → embedded Typst  (typst)     compiled in-process, from an in-memory World
   → PDF bytes
 ```
+
+Each parenthesised label is the `adocpdf-*` crate that holds the step. The
+source file is read earlier still, by `adocpdf-host`, which is the only crate
+that touches the filesystem.
 
 Dependencies flow strictly inward and a checked-in guard fails the build if they
 do not. `adocpdf-core` has no dependencies at all; `adocpdf-domain` names no
@@ -230,7 +234,7 @@ Two properties worth knowing:
 is Apache-2.0 only, and anyone redistributing this software inherits those
 obligations. The bundled DejaVu Sans font is under the Bitstream Vera licence,
 whose permission notice must travel with every copy — see
-`crates/adocpdf-infra/assets/fonts/LICENSE-DejaVu.txt`. Full details in
+`crates/adocpdf-typst/assets/fonts/LICENSE-DejaVu.txt`. Full details in
 `LICENSING.md`.
 
 ## Development

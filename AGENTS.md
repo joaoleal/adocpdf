@@ -48,26 +48,44 @@ request that triggered it asks to build something.
 Clean Architecture with a strict inward dependency rule, enforced by a checked-in
 guard (`xtask/tests/architecture.rs`) reading `architecture.toml`:
 
-| Crate | May depend on |
-|---|---|
-| `adocpdf-core` | nothing (std only) |
-| `adocpdf-domain` | core |
-| `adocpdf-shared` | core |
-| `adocpdf-infra` | core, domain, shared |
-| `adocpdf-cli` | core, domain, shared, infra |
-| `adocpdf-wasm` | core, domain, shared, infra |
+| Crate | Ring | May depend on |
+|---|---|---|
+| `adocpdf-core` | entities | nothing (std only) |
+| `adocpdf-domain` | use cases | core |
+| `adocpdf-shared` | interface adapters | core |
+| `adocpdf-adapters` | interface adapters | domain, shared |
+| `adocpdf-asciidoc` | frameworks | core, domain, adapters |
+| `adocpdf-typst` | frameworks | core, domain |
+| `adocpdf-host` | frameworks | domain, adapters |
+| `adocpdf-cli` | frameworks (delivery) | core, domain, shared, adapters, asciidoc, host, typst |
+| `adocpdf-wasm` | frameworks (delivery) | core, domain, shared, typst |
 
 - `adocpdf-core` — document and theme model. Zero dependencies, so its errors
   carry hand-written `Display`/`Error` impls rather than using `thiserror`.
 - `adocpdf-domain` — entities, value objects, ports, use cases. Must never name
   Typst, the AsciiDoc parser, the filesystem, or a delivery mechanism.
 - `adocpdf-shared` — boundary DTOs only, free of business rules. The mapping
-  between DTOs and domain types lives in `adocpdf-infra`, because that is the
+  between DTOs and domain types lives in `adocpdf-adapters`, because that is the
   innermost layer that can see both.
-- `adocpdf-infra` — adapters implementing domain ports. The only layer naming an
-  external technology. Maps foreign errors to `DomainError` at the boundary.
+- `adocpdf-adapters` — the interface-adapter ring: the DTO mapping and the
+  calendar arithmetic both engines share. Names no engine, no filesystem.
+- `adocpdf-asciidoc` — the AsciiDoc adapter. Maps foreign errors to
+  `DomainError` at the boundary.
+- `adocpdf-typst` — the Typst adapter: markup emission, the engine world, the
+  embedded fonts. Maps foreign errors to `DomainError` at the boundary.
+- `adocpdf-host` — the host adapters. The only crate touching the filesystem or
+  the wall clock.
 - `adocpdf-cli` / `adocpdf-wasm` — composition roots. No business logic.
 - `xtask` — tooling. Not a layer; nothing may depend on it.
+
+Each external technology is confined to a single crate **in production code**:
+`asciidoc-parser` to `adocpdf-asciidoc`, Typst to `adocpdf-typst`. The
+confinement the guard actually enforces is one notch wider, and the gap is worth
+knowing: `architecture.toml` folds `[dependencies]` and `[dev-dependencies]`
+into one list, so `adocpdf-cli` is also permitted `typst` and `typst-layout` —
+the moved layout tests read the frames the engine produced, and naming those
+geometry types is unavoidable. Nothing under `crates/adocpdf-cli/src/` names
+Typst, but nothing would report it if something did.
 
 ## Conventions
 
@@ -75,8 +93,9 @@ guard (`xtask/tests/architecture.rs`) reading `architecture.toml`:
   string, `anyhow`, or a bare `Box<dyn Error>` in domain or application code.
 - Value objects validate on construction and are immutable after. An invalid
   value must not be representable.
-- Ports are traits owned by the domain; adapters live in infra and are injected
-  at a composition root. No DI framework, no global singletons.
+- Ports are traits owned by the domain; adapters live in the frameworks ring
+  (`adocpdf-asciidoc`, `adocpdf-typst`, `adocpdf-host`) and are injected at a
+  composition root. No DI framework, no global singletons.
 - Domain use cases are tested with hand-written in-memory fakes, not a mocking
   crate. Adapters get integration tests against real I/O.
 - Test names describe behaviour. Never name a test after a task or requirement
@@ -156,10 +175,11 @@ on a schedule instead. None of them is a substitute for a test.
 | `cargo-mutants` | would any test have noticed if this code were wrong | `.github/workflows/mutants.yml`, weekly |
 
 **Property tests are the exception — they are in the gate**, because they are
-ordinary `#[test]`s. `crates/adocpdf-infra/src/markup.rs`,
-`crates/adocpdf-infra/src/inline.rs` and `crates/adocpdf-domain/src/sandbox.rs`
-each carry a `properties` module, and `crates/adocpdf-infra/tests/injection.rs`
-runs the same claims through the real engine at a lower case count. Failing seeds are saved to
+ordinary `#[test]`s. `crates/adocpdf-typst/src/markup.rs`,
+`crates/adocpdf-asciidoc/src/inline.rs` and
+`crates/adocpdf-domain/src/sandbox.rs` each carry a `properties` module, and
+`crates/adocpdf-typst/tests/injection.rs` runs the same claims through the real
+engine at a lower case count. Failing seeds are saved to
 `proptest-regressions/` and **are committed** — that directory is a record of
 every counterexample ever found, and deleting it throws that away.
 

@@ -3,7 +3,7 @@
 //! This layer states the business rules of rendering an AsciiDoc document, and
 //! the traits ([ports]) through which it reaches the outside world. It must
 //! never name Typst, the AsciiDoc parser, the filesystem, or a delivery
-//! mechanism — those are implementation choices that live in `adocpdf-infra`.
+//! mechanism — those are implementation choices that live in the outer rings.
 //!
 //! [ports]: https://en.wikipedia.org/wiki/Hexagonal_architecture_(software)
 #![cfg_attr(

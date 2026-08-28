@@ -3,7 +3,7 @@
 Every construct the AsciiDoc language defines, and what `adocpdf` does with it.
 
 This file is the scope of every later change, and it is **executable**: the
-`Status` and `Sample` columns are read by `crates/adocpdf-infra/tests/support_inventory.rs`,
+`Status` and `Sample` columns are read by `crates/adocpdf-cli/tests/support_inventory.rs`,
 which renders each sample and checks the claim. A row cannot say `honoured`
 without the renderer honouring it, and a row cannot say `partial` without
 naming a later tier that finishes it. A document that promises more than the

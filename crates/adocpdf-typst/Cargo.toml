@@ -1,0 +1,24 @@
+[package]
+name = "adocpdf-typst"
+description = "Frameworks ring: the Typst adapter. The only crate that names Typst in production code."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+adocpdf-core = { path = "../adocpdf-core", version = "0.1.0" }
+adocpdf-domain = { path = "../adocpdf-domain", version = "0.1.0" }
+typst.workspace = true
+typst-layout.workspace = true
+typst-pdf.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+# Reads the text back out of a rendered PDF, so the Tier 2 injection property
+# asserts on what a reader would actually see rather than on our own buffer.
+pdf-extract.workspace = true

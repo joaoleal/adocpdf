@@ -1,0 +1,15 @@
+[package]
+name = "adocpdf-adapters"
+description = "Interface-adapter ring: converts between boundary shapes and the domain's own types. Names no engine."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+adocpdf-domain = { path = "../adocpdf-domain", version = "0.1.0" }
+adocpdf-shared = { path = "../adocpdf-shared", version = "0.1.0" }
+
+[lints]
+workspace = true

@@ -21,11 +21,11 @@
 
 #![no_main]
 
+use adocpdf_asciidoc::parser::AsciidocParser;
 use adocpdf_core::theme::ThemeSet;
 use adocpdf_domain::document_plan::plan_document;
 use adocpdf_domain::ports::{Date, DocumentParser};
-use adocpdf_infra::emitter::emit;
-use adocpdf_infra::parser::AsciidocParser;
+use adocpdf_typst::emitter::emit;
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {

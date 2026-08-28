@@ -40,8 +40,8 @@ context: |
     Anything interpolated into generated markup must be escaped or drawn from a
     restricted alphabet.
   - Typst's `World` trait (`source`, `file`, `font`, `today`) is the engine's
-    own port for the outside world. Implement it in the infrastructure layer;
-    never let it leak inward.
+    own port for the outside world. Implement it in `adocpdf-typst`, the only
+    production crate that may name the engine; never let it leak inward.
   - `World::today` and the parser's `ReferenceTime` both read a clock. Inject
     the date through a port so builds are reproducible.
 
@@ -50,12 +50,15 @@ context: |
   Dependencies flow strictly inward. A crate may depend only on crates in its
   allowed set:
 
-    adocpdf-core    -> (nothing; std only)
-    adocpdf-domain  -> core
-    adocpdf-shared  -> core
-    adocpdf-infra   -> core, domain, shared
-    adocpdf-cli     -> core, domain, shared, infra
-    adocpdf-wasm    -> core, domain, shared, infra
+    adocpdf-core      -> (nothing; std only)          [entities]
+    adocpdf-domain    -> core                         [use cases]
+    adocpdf-shared    -> core                         [interface adapters]
+    adocpdf-adapters  -> domain, shared               [interface adapters]
+    adocpdf-asciidoc  -> core, domain, adapters       [frameworks]
+    adocpdf-typst     -> core, domain                 [frameworks]
+    adocpdf-host      -> domain, adapters             [frameworks]
+    adocpdf-cli       -> core, domain, shared, adapters, asciidoc, host, typst
+    adocpdf-wasm      -> core, domain, shared, typst
 
   - `adocpdf-core` is the innermost ring: the document and theme model, zero
     dependencies. Any layer may depend inward on it.
@@ -65,10 +68,21 @@ context: |
   - `adocpdf-shared` holds boundary DTOs only. It must stay free of domain
     business rules so the wasm layer can serialize a request without linking
     them.
-  - `adocpdf-infra` implements domain ports. Adapters catch external errors at
-    the boundary and map them to typed domain errors.
+  - `adocpdf-adapters` is the interface-adapter ring: the DTO mapping and the
+    calendar arithmetic both engines share. It names no engine and no
+    filesystem.
+  - `adocpdf-asciidoc`, `adocpdf-typst` and `adocpdf-host` are the frameworks
+    ring: they implement domain ports, catch external errors at the boundary and
+    map them to typed domain errors. Each external technology lives in exactly
+    one of them in production code — `asciidoc-parser` in `adocpdf-asciidoc`,
+    Typst in `adocpdf-typst`, the filesystem and the wall clock in
+    `adocpdf-host`.
   - Delivery crates (`cli`, `wasm`) are composition roots: they construct
-    adapters and inject them. No business logic.
+    adapters and inject them. No business logic. `adocpdf-cli` is also permitted
+    `typst` and `typst-layout` as dev-dependencies, because the layout tests
+    read the engine's own frames; nothing under its `src/` names them, but
+    `architecture.toml` reads dependencies and dev-dependencies as one list, so
+    the permission is real.
   - A crate must never depend on a delivery crate.
 
   ## Conventions
@@ -79,8 +93,9 @@ context: |
     at the boundary.
   - Value objects validate on construction and are immutable after. An invalid
     value must not be representable.
-  - Ports are traits owned by the domain; adapters live in infra and are
-    injected at a composition root. No DI framework, no global singletons.
+  - Ports are traits owned by the domain; adapters live in the frameworks ring
+    (`adocpdf-asciidoc`, `adocpdf-typst`, `adocpdf-host`) and are injected at a
+    composition root. No DI framework, no global singletons.
   - Testing: domain use cases are tested with hand-written in-memory fakes, not
     a mocking crate. Adapters get integration tests against real I/O.
   - Test names describe behaviour. Never name a test after a task or

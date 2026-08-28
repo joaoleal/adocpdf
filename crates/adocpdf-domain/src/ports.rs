@@ -1,6 +1,7 @@
 //! The traits through which the application reaches the outside world.
 //!
-//! Every one of these is implemented in `adocpdf-infra` and injected at a
+//! Every one of these is implemented in the frameworks ring —
+//! `adocpdf-asciidoc`, `adocpdf-typst` or `adocpdf-host` — and injected at a
 //! composition root. The domain names the contract; it never names the
 //! technology satisfying it.
 

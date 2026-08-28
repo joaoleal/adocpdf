@@ -9,9 +9,9 @@
 //! path. Turning one into the other, and checking it, happens further in.
 //!
 //! The mapping between these and the domain's own types lives in
-//! `adocpdf-infra`. It cannot live here: this crate may depend only on
+//! `adocpdf-adapters`. It cannot live here: this crate may depend only on
 //! `adocpdf-core`, and it cannot live in the domain either, for the same
-//! reason. Infrastructure is the innermost layer that sees both.
+//! reason. The interface-adapter ring is the innermost one that sees both.
 
 /// A request to render a document.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

@@ -28,9 +28,9 @@ Permissively licensed and compatible:
 
 | Crate | Version | Licence | Where |
 |---|---|---|---|
-| `asciidoc-parser` | 0.29.19 | MIT OR Apache-2.0 | `adocpdf-infra` |
+| `asciidoc-parser` | 0.29.19 | MIT OR Apache-2.0 | `adocpdf-asciidoc` |
 | `clap` | 4.6.6 | MIT OR Apache-2.0 | `adocpdf-cli` |
-| `thiserror` | 2.0.20 | MIT OR Apache-2.0 | domain, infra |
+| `thiserror` | 2.0.20 | MIT OR Apache-2.0 | `adocpdf-domain` |
 | `toml` | 1.1.4 | MIT OR Apache-2.0 | `xtask` (tooling) |
 | `pdf-extract` | 0.12.0 | MIT | `adocpdf-cli` (tests only) |
 
@@ -38,11 +38,11 @@ Permissively licensed and compatible:
 
 ## The bundled font
 
-`crates/adocpdf-infra/assets/fonts/DejaVuSans.ttf` is compiled into the binary,
+`crates/adocpdf-typst/assets/fonts/DejaVuSans.ttf` is compiled into the binary,
 so it is redistributed with every copy.
 
 - **Licence:** Bitstream Vera (DejaVu changes are public domain).
-- **Full text:** `crates/adocpdf-infra/assets/fonts/LICENSE-DejaVu.txt`.
+- **Full text:** `crates/adocpdf-typst/assets/fonts/LICENSE-DejaVu.txt`.
 
 The licence requires that **the copyright and permission notice be included with
 every copy of the font software**. Because the font is embedded in the binary,
