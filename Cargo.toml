@@ -31,7 +31,7 @@ repository = "https://github.com/joaoleal/adocpdf"
 typst = "0.15.1"
 typst-layout = "0.15.1"
 typst-pdf = "0.15.1"
-asciidoc-parser = "0.29.19"
+asciidoc-parser = "0.30.0"
 clap = { version = "4.6.6", features = [ "derive" ] }
 thiserror = "2.0.20"
 
