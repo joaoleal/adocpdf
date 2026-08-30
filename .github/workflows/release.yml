@@ -48,7 +48,7 @@ jobs:
       # flags exactly this shape. A release is rare and its provenance matters
       # more than its wall-clock, so it builds from scratch.
       - name: Install the release tools
-        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2.87.0
         with:
           tool: >-
             cargo-auditable@0.7.5,
