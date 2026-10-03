@@ -100,7 +100,7 @@ jobs:
       # Prebuilt binaries. `cargo install` would compile eight substantial
       # tools from source on every cache miss.
       - name: Install the gate's tools
-        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2.87.0
+        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
           tool: >-
             cargo-llvm-cov,
