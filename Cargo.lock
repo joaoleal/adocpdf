@@ -107,6 +107,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ahash"
+version = "0.8.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
+dependencies = [
+ "cfg-if",
+ "getrandom 0.3.4",
+ "once_cell",
+ "version_check",
+ "zerocopy",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -197,14 +210,16 @@ checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
 name = "asciidoc-parser"
-version = "0.29.19"
+version = "0.31.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e2bd6e940f093f2ed46ffc25df497d8c9c6966096565e8716ad9a4f701313b3"
+checksum = "54a50e21f699445ec37656de34bb0a9c191e31dc8f4805687ef3f38e09a0cf0f"
 dependencies = [
+ "ahash",
  "bytecount",
  "memchr",
  "percent-encoding",
  "regex",
+ "regex-automata",
  "self_cell",
  "thiserror",
 ]
